@@ -58,6 +58,16 @@ This project is powered by passion. If VansonMod has helped you, please consider
 
 ---
 
+## ⚠️ Disclaimer
+
+**VansonMod is developed strictly for educational purposes and security research.**
+
+*   **Non-Commercial:** Do not use this tool for commercial gain or illegal activities.
+*   **Fair Play:** Please respect game developers and other players. Do not use this tool to disrupt the fairness of online multiplayer games.
+*   **Use at Your Own Risk:** As a root-level tool, improper use may cause app crashes or system instability. The developer is not responsible for any data loss, device issues, or account bans resulting from the use of this tool.
+
+---
+
 ## 🤝 Credits
 
 *   Created by **Vaenshine**
