@@ -13,35 +13,18 @@
 
 ## 🚀 What is VansonMod?
 
-**VansonMod** is a standalone, powerful memory manipulation tool designed specifically for the **TrollStore** ecosystem.
+**VansonMod** is a standalone Root Helper utility designed specifically for the **TrollStore** environment.
 
-It allows you to modify game values (Health, Gold, etc.) and patch assembly instructions (RVA) directly on your device **without needing a Jailbreak**. It runs as a Root Helper to bypass sandbox limitations, giving you "God Mode" control over other running applications.
+It allows you to modify game values (Health, Gold, etc.) and patch assembly instructions (RVA) directly on your device **without needing a Jailbreak** (for memory scanning). It runs externally to bypass sandbox limitations, giving you control over other running applications.
 
-### 📱 Compatibility
-*   **System:** **iOS 14.0 - 17.0**
-*   **Requirement:** **TrollStore** must be installed.
-*   **Architecture:** Works on all arm64 / arm64e devices.
-
----
-
-## 📖 A Note from the Developer
-
-**Developing VansonMod was quite a journey.**
-
-Bringing a full-featured Memory Editor and Live RVA Patcher to a non-jailbroken environment (TrollStore) was no easy task. Unlike traditional jailbreak tweaks, I couldn't rely on code injection frameworks like Cydia Substrate. I had to build everything from scratch using low-level Mach Kernel APIs to handle memory permissions, ASLR calculations, and process attachment safely.
-
-There were countless sleepless nights, crashes, and "why isn't this working" moments. But I kept going because I wanted to create something powerful for the community.
-
-**VansonMod is, and always will be, 100% FREE.**
-No ads, no paywalls, no hidden features. I built this for the love of technology and reverse engineering.
-
-If you enjoy using it, your support means the world to me! ❤️
+### ⚠️ Important Compatibility Note
+*   **Memory Scanner:** Works on **ALL** devices (Jailbroken & Non-Jailbroken TrollStore users).
+*   **RVA Patcher:** Requires a **Jailbroken Environment** (e.g., Dopamine, Palera1n) to function correctly.
+    *   *Why?* On stock iOS (TrollStore only), **AMFI** prevents modifying executable code (`__TEXT`). Attempting to patch code without a jailbreak will cause the target app to crash immediately.
 
 ---
 
 ## 📸 Screenshots
-
-Here is a glimpse of what VansonMod looks like:
 
 <p align="center">
   <img src="/Sreenshots/Select.PNG" width="30%" alt="Process Select"/>
@@ -53,31 +36,46 @@ Here is a glimpse of what VansonMod looks like:
 
 ## 🔥 Key Features
 
-*   **🧠 Cross-Process RVA Patcher:** Live assembly patching with auto ASLR calculation and safety checks.
-*   **🔍 Memory Scanner:** Search, modify, and lock values (Int/Float/Double) just like Cheat Engine.
-*   **📱 Process Manager:** Attach to, kill, or launch any app on your device.
-*   **💾 Hex Editor:** View and edit raw memory.
-*   **🌍 Multi-Language:** English & Chinese support.
+### 1. Cross-Process RVA Patcher (Jailbreak Required)
+*   **Live Offset Patch:** Input the RVA Offset (from IDA/Hopper), and the tool automatically calculates the absolute address based on the module's ASLR slide.
+*   **Safety:** Handles memory permissions (`RX` -> `RWX` -> `RX`) to ensure stability on jailbroken devices.
+*   **Presets:** Built-in ARM64 hex codes (RET True, NOP, etc.).
+
+### 2. Memory Scanner (For Everyone)
+*   **Data Types:** Int8, Int16, Int32, Int64, Float, Double.
+*   **Search Modes:** Exact Value, Bigger, Smaller, Changed, Unchanged.
+*   **Locking:** Freeze values to prevent them from changing in-game.
+
+### 3. Process Manager
+*   View all running User and System applications with icons and Bundle IDs.
+*   **Attach:** Hook into any process using `task_for_pid`.
+*   **Management:** Force kill or launch apps directly.
+
+### 4. Hex Editor
+*   View raw memory in Hexadecimal and ASCII.
+*   Jump to specific memory addresses instantly.
+
+### 5. Multi-Language
+*   Supports English and Simplified Chinese (Auto-detects system language).
 
 ---
 
 ## ☕ Support & Donation
 
-This project is powered by passion. If VansonMod has helped you, please consider buying me a coffee! It helps keep the updates coming.
+**VansonMod is free.** However, developing it involves a lot of effort and coffee.
+If this tool helped you, please consider supporting the development! ❤️
 
 | **Ko-fi (Global)** | **WeChat Pay (China)** |
 | :---: | :---: |
-| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>Click the button above to support via Ko-fi! | <img src="/Sreenshots/wechat.png" width="200" alt="WeChat Pay"/> |
+| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>Click to support via Ko-fi | <img src="/Sreenshots/wechat.png" width="200" alt="WeChat Pay"/> |
 
 ---
 
-## ⚠️ Disclaimer
+## 📥 Installation
 
-**VansonMod is developed strictly for educational purposes and security research.**
-
-*   **Non-Commercial:** Do not use this tool for commercial gain or illegal activities.
-*   **Fair Play:** Please respect game developers and other players. Do not use this tool to disrupt the fairness of online multiplayer games.
-*   **Use at Your Own Risk:** As a root-level tool, improper use may cause app crashes or system instability. The developer is not responsible for any data loss, device issues, or account bans resulting from the use of this tool.
+1.  Download the latest `.tipa` file from [Releases](../../releases).
+2.  Open and install it using **TrollStore**.
+3.  Enjoy!
 
 ---
 
@@ -86,6 +84,15 @@ This project is powered by passion. If VansonMod has helped you, please consider
 *   Created by **Vaenshine**
 *   Special Thanks to: **Gey1ist**, **Xiczee**, **Zoomin**
 *   Supported by: [iOSGods.com](https://iosgods.com/)
+
+---
+
+## ⚠️ Disclaimer
+
+This tool is for **educational purposes and security research only**.
+*   **Non-Commercial:** Do not use this tool for commercial gain or illegal activities.
+*   **Fair Play:** Please respect game developers and other players. Do not use this tool to disrupt the fairness of online multiplayer games.
+*   **Use at Your Own Risk:** The developer is not responsible for any data loss, device issues, or account bans resulting from the use of this tool.
 
 ---
 
