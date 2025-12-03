@@ -11,6 +11,19 @@
 
 ---
 
+## 🚀 What is VansonMod?
+
+**VansonMod** is a standalone, powerful memory manipulation tool designed specifically for the **TrollStore** ecosystem.
+
+It allows you to modify game values (Health, Gold, etc.) and patch assembly instructions (RVA) directly on your device **without needing a Jailbreak**. It runs as a Root Helper to bypass sandbox limitations, giving you "God Mode" control over other running applications.
+
+### 📱 Compatibility
+*   **System:** **iOS 14.0 - 17.0**
+*   **Requirement:** **TrollStore** must be installed.
+*   **Architecture:** Works on all arm64 / arm64e devices.
+
+---
+
 ## 📖 A Note from the Developer
 
 **Developing VansonMod was quite a journey.**
