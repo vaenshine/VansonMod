@@ -1,67 +1,74 @@
 # VansonMod
 
-**The "Big Brain" Memory Tool for TrollStore Gamers**
+**The Ultimate iOS Memory Editor & RVA Patcher for TrollStore**
 
 [![中文说明](https://img.shields.io/badge/Lang-中文-red)](./README_CN.md)
 ![Platform](https://img.shields.io/badge/Platform-iOS%2014.0%2B-black)
 ![Support](https://img.shields.io/badge/Support-TrollStore-blue)
-![Vibe](https://img.shields.io/badge/Vibe-Epic-orange)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-> **Note:** Click the "中文说明" badge above if you prefer reading this in Chinese. Or don't. It's a free country.
+> **Note:** Click the "中文说明" badge above to view the Chinese documentation.
+
+---
+
+## 📖 A Note from the Developer
+
+**Developing VansonMod was quite a journey.**
+
+Bringing a full-featured Memory Editor and Live RVA Patcher to a non-jailbroken environment (TrollStore) was no easy task. Unlike traditional jailbreak tweaks, I couldn't rely on code injection frameworks like Cydia Substrate. I had to build everything from scratch using low-level Mach Kernel APIs to handle memory permissions, ASLR calculations, and process attachment safely.
+
+There were countless sleepless nights, crashes, and "why isn't this working" moments. But I kept going because I wanted to create something powerful for the community.
+
+**VansonMod is, and always will be, 100% FREE.**
+No ads, no paywalls, no hidden features. I built this for the love of technology and reverse engineering.
+
+If you enjoy using it, your support means the world to me! ❤️
 
 ---
 
-## 👊 How’s it going bros?
+## 📸 Screenshots
 
-**VansonMod** is here!
+Here is a glimpse of what VansonMod looks like:
 
-Look, I love Jailbreaking, but sometimes you just have **TrollStore** and you feel left out, right? You want to see what's inside those apps, maybe tweak a value or two, but you can't because... sandbox.
-
-So I sat down, drank some G-Fuel (okay, maybe just coffee), and coded this thing. It runs as a Root Helper, which basically means it has superpowers to look into other apps without needing a full jailbreak. **It’s pretty epic.**
-
-## 👏 Meme Review... I mean, Features
-
-### 1. RVA Patcher (The Cool Stuff)
-Okay, this is the part I'm actually proud of.
-*   **Live Offset Patching:** You know when you find an offset in IDA/Hopper and you're like "Now what?" With this, you just type in the offset, and VansonMod does the math with the ASLR base address. **It just works.**
-*   **TrollStore Support:** We are patching assembly instructions live on a non-jailbroken device. Is it the first one to do it like this? Maybe? I don't know, but it's cool.
-*   **No Crashy-Crashy:** I added some logic (`mach_vm_protect`) to handle memory permissions automatically. So hopefully, your game won't explode when you try to write to it. Hopefully.
-*   **Presets:** I put some buttons like `RET True` and `NOP` so you don't have to remember hex codes. You're welcome.
-
-### 2. Memory Scanner
-Classic cheat engine vibes.
-*   **Search for Numbers:** Ints, Floats, Doubles... whatever you need.
-*   **Search Modes:** "Exact Value" for when you know what you're doing, "Changed/Unchanged" for when you have no clue.
-*   **Lock It:** Found your health? Lock it. Become immortal. (In single-player games, please).
-
-### 3. Process Stuff
-*   See what's running on your phone.
-*   **Attach:** Hook into an app.
-*   **Yeet:** Force kill an app if it's acting sus.
-*   **Launch:** Open apps directly from here. Why not.
-
-### 4. Hex Editor
-*   For the real nerds out there. Look at the raw memory matrix.
-*   Jump to addresses like a hacker in a movie.
-
-### 5. Multi-Language
-*   It speaks **English**.
-*   It speaks **Chinese**.
-*   It switches automatically so you don't have to learn a new language just to use it.
-
-## 📥 How to Install
-
-1.  Grab the `.tipa` from [Releases](../../releases).
-2.  Throw it into **TrollStore**.
-3.  That's it. GG.
-
-## ⚠️ Serious Talk (Disclaimer)
-
-Listen to me, this is important:
-*   **This is for EDUCATIONAL PURPOSES.** Don't be that guy.
-*   **Don't ruin online games.** Nobody likes a cheater in multiplayer. Small PP energy.
-*   **Use at your own risk.** If you mess up your save file or your phone turns into a potato, don't blame me. I'm just a developer on the internet.
+<p align="center">
+  <img src="/Sreenshots/Select.PNG" width="30%" alt="Process Select"/>
+  <img src="/Sreenshots/Rva Patcher.PNG" width="30%" alt="RVA Patcher"/>
+  <img src="/Sreenshots/Settings.PNG" width="30%" alt="Settings"/>
+</p>
 
 ---
-*Made with ❤️ and zero sleep by Vaenshine © 2025*
-*Brofist 👊*
+
+## 🔥 Key Features
+
+*   **🧠 Cross-Process RVA Patcher:** Live assembly patching with auto ASLR calculation and safety checks.
+*   **🔍 Memory Scanner:** Search, modify, and lock values (Int/Float/Double) just like Cheat Engine.
+*   **📱 Process Manager:** Attach to, kill, or launch any app on your device.
+*   **💾 Hex Editor:** View and edit raw memory.
+*   **🌍 Multi-Language:** English & Chinese support.
+
+---
+
+## ☕ Support & Donation
+
+This project is powered by passion. If VansonMod has helped you, please consider buying me a coffee! It helps keep the updates coming.
+
+| **Ko-fi (Global)** | **WeChat Pay (China)** |
+| :---: | :---: |
+| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>Click the button above to support via Ko-fi! | <img src="/Sreenshots/wechat.png" width="200" alt="WeChat Pay"/> |
+
+---
+
+## 🤝 Credits
+
+*   Created by **Vaenshine**
+*   Special Thanks to: **Gey1ist**, **Xiczee**, **Zoomin**
+*   Supported by: [iOSGods.com](https://iosgods.com/)
+
+---
+
+## 📈 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=vaenshine/VansonMod&type=Date)](https://star-history.com/#vaenshine/VansonMod&Date)
+
+---
+*Made with ❤️ by Vaenshine © 2025*
