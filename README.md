@@ -109,4 +109,3 @@ If this tool helped you, please consider supporting the development! ❤️
 [![Star History Chart](https://api.star-history.com/svg?repos=vaenshine/VansonMod&type=Date)](https://star-history.com/#vaenshine/VansonMod&Date)
 
 ---
-*Made with ❤️ by Vaenshine © 2025*
