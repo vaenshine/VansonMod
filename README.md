@@ -68,17 +68,6 @@ It allows you to modify game values (Health, Gold, etc.) and patch assembly inst
 
 ---
 
-## ☕ Support & Donation
-
-**VansonMod is free.** However, developing it involves a lot of effort and coffee.
-If this tool helped you, please consider supporting the development! ❤️
-
-| **Ko-fi (Global)** | **WeChat Pay (China)** |
-| :---: | :---: |
-| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>Click to support via Ko-fi | <img src="/Sreenshots/wechat.png" width="200" alt="WeChat Pay"/> |
-
----
-
 ## 📥 Installation
 
 1.  Download the latest `.tipa` file from [Releases](../../releases).
@@ -101,6 +90,17 @@ This tool is for **educational purposes and security research only**.
 *   **Non-Commercial:** Do not use this tool for commercial gain or illegal activities.
 *   **Fair Play:** Please respect game developers and other players. Do not use this tool to disrupt the fairness of online multiplayer games.
 *   **Use at Your Own Risk:** The developer is not responsible for any data loss, device issues, or account bans resulting from the use of this tool.
+
+---
+
+## ☕ Support & Donation
+
+**VansonMod is free.** However, developing it involves a lot of effort and coffee.
+If this tool helped you, please consider supporting the development! ❤️
+
+| **Ko-fi (Global)** | **WeChat Pay (China)** |
+| :---: | :---: |
+| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>Click to support via Ko-fi | <img src="/Sreenshots/wechat.png" width="200" alt="WeChat Pay"/> |
 
 ---
 
