@@ -65,17 +65,6 @@
 
 ---
 
-## ☕ 捐赠与支持
-
-**VansonMod 是完全免费的。**
-如果您觉得这个工具好用，请考虑请我喝杯咖啡！这会鼓励我继续完善它。
-
-| **Ko-fi (海外用户)** | **微信赞赏 (国内用户)** |
-| :---: | :---: |
-| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>点击上方按钮跳转 Ko-fi | <img src="/Sreenshots/wechat.png" width="200" alt="微信收款码"/> |
-
----
-
 ## 📥 安装方法
 
 1.  在 [Releases](../../releases) 页面下载最新的 `.tipa` 文件。
@@ -101,9 +90,19 @@
 
 ---
 
+## ☕ 捐赠与支持
+
+**VansonMod 是完全免费的。**
+如果您觉得这个工具好用，请考虑请我喝杯咖啡！这会鼓励我继续完善它。
+
+| **Ko-fi (海外用户)** | **微信赞赏 (国内用户)** |
+| :---: | :---: |
+| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>点击上方按钮跳转 Ko-fi | <img src="/Sreenshots/wechat.png" width="200" alt="微信收款码"/> |
+
+---
+
 ## 📈 Star 趋势
 
 [![Star History Chart](https://api.star-history.com/svg?repos=vaenshine/VansonMod&type=Date)](https://star-history.com/#vaenshine/VansonMod&Date)
 
 ---
-*Made with ❤️ by Vaenshine © 2025*
