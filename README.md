@@ -1,5 +1,10 @@
 # VansonMod
 
+<!-- 新增 Social Preview 作为 README 顶部横幅 -->
+<p align="center">
+  <img src="https://repository-images.githubusercontent.com/1109090336/135167c3-e943-48a9-aa0d-67b3c21e844d" alt="VansonMod Social Preview" width="100%"/>
+</p>
+
 **The Ultimate iOS Memory Editor & RVA Patcher for TrollStore**
 
 [![中文说明](https://img.shields.io/badge/Lang-中文-red)](./README_CN.md)
