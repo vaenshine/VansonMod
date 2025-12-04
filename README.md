@@ -28,6 +28,9 @@ It allows you to modify game values (Health, Gold, etc.) and patch assembly inst
 
 <p align="center">
   <img src="/Sreenshots/Select.PNG" width="30%" alt="Process Select"/>
+  <img src="/Sreenshots/Modifier.PNG" width="30%" alt="Modifier"/>
+  <img src="/Sreenshots/HexEditor.PNG" width="30%" alt="HexEditor"/>
+  <img src="/Sreenshots/RowEditor.PNG" width="30%" alt="RowEditor"/>
   <img src="/Sreenshots/Rva Patcher.PNG" width="30%" alt="RVA Patcher"/>
   <img src="/Sreenshots/Settings.PNG" width="30%" alt="Settings"/>
 </p>
