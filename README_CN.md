@@ -15,7 +15,7 @@
 
 **VansonMod** 是一款专为 **TrollStore (巨魔)** 环境设计的独立 Root Helper 工具。
 
-它打破了传统修改器需要越狱的限制（针对内存搜索），让你在非越狱设备上也能像使用 CE 一样修改数值。它利用巨魔的高级权限运行，实现了对其他进程的“降维打击”。
+它打破了传统修改器需要越狱的限制（针对内存搜索），让你在非越狱设备上也能修改数值。它利用巨魔的高级权限运行，实现了跨进程操作”。
 
 ### ⚠️ 重要兼容性提示
 *   **内存修改器 (搜数值)**：完美支持 **所有** 设备（包括未越狱的巨魔用户）。
@@ -27,9 +27,12 @@
 ## 📸 应用截图
 
 <p align="center">
-  <img src="/Sreenshots/Select.PNG" width="30%" alt="进程选择"/>
-  <img src="/Sreenshots/Rva Patcher.PNG" width="30%" alt="RVA 修改器"/>
-  <img src="/Sreenshots/Settings.PNG" width="30%" alt="设置页面"/>
+  <img src="/Sreenshots/Select.PNG" width="30%" alt="Process Select"/>
+  <img src="/Sreenshots/Modifier.PNG" width="30%" alt="Modifier"/>
+  <img src="/Sreenshots/HexEditor.PNG" width="30%" alt="HexEditor"/>
+  <img src="/Sreenshots/RowEditor.PNG" width="30%" alt="RowEditor"/>
+  <img src="/Sreenshots/Rva Patcher.PNG" width="30%" alt="RVA Patcher"/>
+  <img src="/Sreenshots/Settings.PNG" width="30%" alt="Settings"/>
 </p>
 
 ---
