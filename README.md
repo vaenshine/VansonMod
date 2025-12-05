@@ -10,10 +10,9 @@
 ![Platform](https://img.shields.io/badge/Platform-iOS%2014.0%2B-black)
 ![Support](https://img.shields.io/badge/Support-TrollStore-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
+[![Join Telegram](https://img.shields.io/badge/Join-Telegram%20Channel-blue?logo=telegram&logoWidth=20&labelColor=26A5E4&color=white)](https://t.me/VansonMod)
 
 > **注意:** ：点击上方的「中文说明」徽章，可查看中文文档。
-
-[Join the VansonMod Telegram Channel](https://t.me/VansonMod "Access the official VansonMod Telegram channel for updates and support")
 
 ---
 
