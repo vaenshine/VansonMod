@@ -13,6 +13,8 @@
 
 > **注意:** ：点击上方的「中文说明」徽章，可查看中文文档。
 
+[Join the VansonMod Telegram Channel](https://t.me/VansonMod "Access the official VansonMod Telegram channel for updates and support")
+
 ---
 
 ## 📖 Introduction
