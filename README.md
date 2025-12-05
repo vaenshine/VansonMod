@@ -138,7 +138,7 @@ This tool is for **educational purposes and security research only**.
 
 | **Ko-fi (Global)** | **WeChat Pay (China)** |
 | :---: | :---: |
-| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>Click to support via Ko-fi | <img src="/Sreenshots/wechat.png" width="200" alt="WeChat Pay"/> |
+| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>Click to support via Ko-fi | <img src="/Screenshots/wechat.png" width="200" alt="WeChat Pay"/> |
 
 ---
 
