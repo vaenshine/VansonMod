@@ -13,6 +13,8 @@
 
 > **Note:** Click the "English Readme" badge above to view the English documentation.
 
+> [![加入Telegram](https://img.shields.io/badge/加入-Telegram%20频道-blue?logo=telegram&logoWidth=20&labelColor=26A5E4&color=white)](https://t.me/VansonMod)
+
 ---
 
 ## 📖 简介
