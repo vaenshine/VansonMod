@@ -138,7 +138,7 @@
 
 | **Ko-fi (海外用户)** | **微信赞赏 (国内用户)** |
 | :---: | :---: |
-| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>点击上方按钮跳转 Ko-fi | <img src="/Sreenshots/wechat.png" width="200" alt="微信收款码"/> |
+| [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vaenshine)<br><br>点击上方按钮跳转 Ko-fi | <img src="/Screenshots/wechat.png" width="200" alt="微信收款码"/> |
 
 ---
 
