@@ -1,31 +1,30 @@
 # VansonMod
 
-<!-- 新增 Social Preview 作为 README 顶部横幅 -->
 <p align="center">
   <img src="https://repository-images.githubusercontent.com/1109090336/135167c3-e943-48a9-aa0d-67b3c21e844d" alt="VansonMod Social Preview" width="100%"/>
 </p>
 
-**The Ultimate iOS Memory Editor & RVA Patcher for TrollStore**
+**An iOS Memory Editor & RVA Patcher for TrollStore**
 
 [![中文说明](https://img.shields.io/badge/Lang-中文-red)](./README_CN.md)
 ![Platform](https://img.shields.io/badge/Platform-iOS%2014.0%2B-black)
 ![Support](https://img.shields.io/badge/Support-TrollStore-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-> **Note:** Click the "中文说明" badge above to view the Chinese documentation.
+> **注意:** ：点击上方的「中文说明」徽章，可查看中文文档。
 
 ---
 
-## 🚀 What is VansonMod?
+## 📖 Introduction
 
-**VansonMod** is a standalone Root Helper utility designed specifically for the **TrollStore** environment.
+**VansonMod** is a standalone Root Helper utility developed for the **TrollStore** environment.
 
-It allows you to modify game values (Health, Gold, etc.) and patch assembly instructions (RVA) directly on your device **without needing a Jailbreak** (for memory scanning). It runs externally to bypass sandbox limitations, giving you control over other running applications.
+It allows you to modify game values (Health, Gold, etc.), manage app data, and patch assembly instructions (RVA) directly on your device. Unlike traditional tweaks that rely on code injection, VansonMod runs externally using Mach Kernel APIs to manipulate other running processes.
 
-### ⚠️ Important Compatibility Note
-*   **Memory Scanner:** Works on **ALL** devices (Jailbroken & Non-Jailbroken TrollStore users).
-*   **RVA Patcher:** Requires a **Jailbroken Environment** (e.g., Dopamine, Palera1n) to function correctly.
-    *   *Why?* On stock iOS (TrollStore only), **AMFI** prevents modifying executable code (`__TEXT`). Attempting to patch code without a jailbreak will cause the target app to crash immediately.
+### ⚠️ Compatibility Note
+*   **Memory Scanner / Data Manager:** Works on **ALL** devices (Jailbroken & Non-Jailbroken TrollStore users).
+*   **RVA Patcher:** Requires a **Jailbroken Environment** (e.g., Dopamine, Palera1n).
+    *   *Reason:* On stock iOS (TrollStore only), **AMFI** strictly enforces code signatures. Modifying executable code (`__TEXT`) without a jailbreak will cause the target app to crash.
 
 ---
 
@@ -35,6 +34,8 @@ It allows you to modify game values (Health, Gold, etc.) and patch assembly inst
   <img src="/Sreenshots/Select.PNG" width="30%" alt="Process Select"/>
   <img src="/Sreenshots/Modifier.PNG" width="30%" alt="Modifier"/>
   <img src="/Sreenshots/HexEditor.PNG" width="30%" alt="HexEditor"/>
+</p>
+<p align="center">
   <img src="/Sreenshots/RowEditor.PNG" width="30%" alt="RowEditor"/>
   <img src="/Sreenshots/Rva Patcher.PNG" width="30%" alt="RVA Patcher"/>
   <img src="/Sreenshots/Settings.PNG" width="30%" alt="Settings"/>
@@ -42,29 +43,65 @@ It allows you to modify game values (Health, Gold, etc.) and patch assembly inst
 
 ---
 
-## 🔥 Key Features
+## ✨ Features
 
-### 1. Cross-Process RVA Patcher (Jailbreak Required)
-*   **Live Offset Patch:** Input the RVA Offset (from IDA/Hopper), and the tool automatically calculates the absolute address based on the module's ASLR slide.
-*   **Safety:** Handles memory permissions (`RX` -> `RWX` -> `RX`) to ensure stability on jailbroken devices.
-*   **Presets:** Built-in ARM64 hex codes (RET True, NOP, etc.).
-
-### 2. Memory Scanner (For Everyone)
-*   **Data Types:** Int8, Int16, Int32, Int64, Float, Double.
+### 1. Memory Scanner
+A standard memory scanning tool.
+*   **Data Types:** Supports Int8, Int16, Int32, Int64, Float, and Double.
 *   **Search Modes:** Exact Value, Bigger, Smaller, Changed, Unchanged.
-*   **Locking:** Freeze values to prevent them from changing in-game.
+*   **Locking:** Freeze values to prevent them from changing (Supports background locking).
+*   **Memory Browser:** View and edit nearby memory values intuitively.
 
-### 3. Process Manager
-*   View all running User and System applications with icons and Bundle IDs.
-*   **Attach:** Hook into any process using `task_for_pid`.
-*   **Management:** Force kill or launch apps directly.
+### 2. Cross-Process RVA Patcher (Jailbreak Required)
+Modify assembly instructions of running apps.
+*   **Live Offset Patch:** Input the RVA Offset (from IDA/Hopper), and the tool calculates the absolute address based on the module's ASLR slide.
+*   **Safety:** Handles memory permissions (`RX` -> `RWX` -> `RX`) to ensure stability.
+*   **Presets:** Built-in common ARM64 hex codes.
 
-### 4. Hex Editor
+### 3. App Data Manager (New)
+*   **Backup/Restore:** Easily backup app data (Documents/Library) and restore it later.
+*   **Export/Import:** Share backups or import external saves via the native iOS Files app.
+
+### 4. Process Manager
+*   View running User and System applications with icons.
+*   **Filter:** Automatically hides system extensions and widgets for a cleaner view.
+*   **Control:** Attach to, Kill, or Launch apps directly.
+
+### 5. Hex Editor
 *   View raw memory in Hexadecimal and ASCII.
-*   Jump to specific memory addresses instantly.
+*   **Row Editor:** Real-time editing with split views.
+*   **Navigation:** Infinite scrolling and jump to address.
 
-### 5. Multi-Language
-*   Supports English and Simplified Chinese (Auto-detects system language).
+---
+
+## 📝 Changelog
+
+### v1.4 - Save Manager & Optimizations
+*   **New Feature:** Added Backup/Restore functionality for App Data.
+*   **New Feature:** Added "Check for Updates" in Settings.
+*   **Optimization:** Improved process classification logic.
+*   **Fix:** Resolved an issue where process filtering would fail.
+*   **Stability:** Enhanced overall stability and fixed various crashes.
+
+### v1.3 - Stability & Feature Expansion
+*   **Stability:** Enhanced app stability and resolved crash issues.
+*   **Process Filtering:** Added filtering to exclude system processes/widgets.
+*   **Modifier:** Optimized the Modifier module and added a refresh function.
+*   **New Feature:** Memory Browser (Value) for intuitive viewing.
+
+### v1.2 - Feature Enhancement & UI/UX
+*   **Hex Editor:** Added inline editing (Row Editor) with real-time preview.
+*   **UI Optimization:** Refined interface design.
+*   **Favorites:** Added a dedicated button and management features (Edit Note/Delete).
+*   **Fix:** Resolved specific crash issues.
+
+### v1.1 - Safety Update
+*   **RVA Safety Check:** Added environment detection. Warns non-jailbroken users before patching to prevent AMFI-caused crashes.
+*   **Optimization:** Improved stability during process switching.
+
+### v1.0 - Initial Release
+*   First public release for TrollStore.
+*   Basic Memory Scanner, RVA Patcher, Process Manager, and Hex Editor.
 
 ---
 
@@ -88,15 +125,14 @@ It allows you to modify game values (Health, Gold, etc.) and patch assembly inst
 
 This tool is for **educational purposes and security research only**.
 *   **Non-Commercial:** Do not use this tool for commercial gain or illegal activities.
-*   **Fair Play:** Please respect game developers and other players. Do not use this tool to disrupt the fairness of online multiplayer games.
-*   **Use at Your Own Risk:** The developer is not responsible for any data loss, device issues, or account bans resulting from the use of this tool.
+*   **Fair Play:** Please respect game developers. Do not use this tool to disrupt online multiplayer games.
+*   **Risk:** The developer is not responsible for any data loss, device issues, or bans resulting from the use of this tool.
 
 ---
 
 ## ☕ Support & Donation
 
-**VansonMod is free.** However, developing it involves a lot of effort and coffee.
-If this tool helped you, please consider supporting the development! ❤️
+**VansonMod is free.** If this tool helped you, please consider supporting the development! ❤️
 
 | **Ko-fi (Global)** | **WeChat Pay (China)** |
 | :---: | :---: |
@@ -109,3 +145,4 @@ If this tool helped you, please consider supporting the development! ❤️
 [![Star History Chart](https://api.star-history.com/svg?repos=vaenshine/VansonMod&type=Date)](https://star-history.com/#vaenshine/VansonMod&Date)
 
 ---
+*Made with ❤️ by Vaenshine © 2025*
