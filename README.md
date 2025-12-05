@@ -60,7 +60,7 @@ Modify assembly instructions of running apps.
 
 ### 3. App Data Manager (New)
 *   **Backup/Restore:** Easily backup app data (Documents/Library) and restore it later.
-*   **Export/Import:** Share backups or import external saves via the native iOS Files app.
+*   **Export/Import:** Manually select and import external saves.
 
 ### 4. Process Manager
 *   View running User and System applications with icons.
