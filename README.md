@@ -137,10 +137,11 @@ Modify assembly instructions of running apps.
 
 ## ⚠️ Disclaimer
 
-This tool is for **educational purposes and security research only**.
-*   **Non-Commercial:** Do not use this tool for commercial gain or illegal activities.
-*   **Fair Play:** Please respect game developers and other players. Do not use this tool to disrupt the fairness of online multiplayer games.
-*   **Use at Your Own Risk:** The developer is not responsible for any data loss, device issues, or bans resulting from the use of this tool.
+This tool is intended **solely for security research and reverse engineering learning purposes**. Please read the following terms carefully before use; use of this tool shall be deemed as acceptance of all the terms below:
+
+*   **Non-profit and Compliance:** It is strictly prohibited to use this tool for commercial profit, illegal intrusion, data theft, or any other acts that violate laws, regulations, or platform rules. Use is limited to legitimate learning and research scenarios only.
+*   **Fairness and Respect Principle:** Please respect the intellectual property rights of application/game developers and the legitimate rights and interests of other users. Do not use this tool for malicious purposes such as disrupting the normal operation of applications, tampering with data, or undermining the fairness of use.
+*   **Risk Assumption:** Users shall independently assess the relevant risks of using this tool. The developer shall not be liable for any direct or indirect liabilities arising from data loss, device damage, account suspension, or legal liabilities caused by unauthorized use, improper operation, or other reasons.
 
 ---
 
