@@ -11,7 +11,7 @@
 ![Support](https://img.shields.io/badge/Support-TrollStore-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-> **提示:** 点击上方的 "English Readme" 徽章可查看英文文档。
+> **Note:** Click the "Lang English" badge above to view the English documentation.
 
 > [![Join Telegram](https://img.shields.io/badge/加入-Telegram%20频道-blue?logo=telegram&logoWidth=20&labelColor=26A5E4&color=white)](https://t.me/VansonMod)
 
