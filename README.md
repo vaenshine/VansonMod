@@ -50,9 +50,13 @@ It allows you to modify game values (Health, Gold, etc.), manage app data, and p
 ### 1. Memory Scanner
 A standard memory scanning tool.
 *   **Data Types:** Supports Int8, Int16, Int32, Int64, Float, and Double.
-*   **Search Modes:** Exact Value, Bigger, Smaller, Changed, Unchanged.
+*   **Search Modes:**
+    *   **Exact Search:** Find specific values.
+    *   **Fuzzy Search:** Search for unknown initial values (Increased / Decreased / Changed / Unchanged).
+    *   **Group Search:** Search for multiple values with specific distances (e.g., `500,1000`).
+*   **Batch Modify:** Modify all results with a **Fixed Value** or **Increment Value** (+1, +2...).
 *   **Locking:** Freeze values to prevent them from changing (Supports background locking).
-*   **Memory Browser:** View and edit nearby memory values intuitively.
+*   **Memory Browser:** View nearby memory values intuitively with infinite scrolling.
 
 ### 2. Cross-Process RVA Patcher (Jailbreak Required)
 Modify assembly instructions of running apps.
@@ -60,23 +64,31 @@ Modify assembly instructions of running apps.
 *   **Safety:** Handles memory permissions (`RX` -> `RWX` -> `RX`) to ensure stability.
 *   **Presets:** Built-in common ARM64 hex codes.
 
-### 3. App Data Manager (New)
-*   **Backup/Restore:** Easily backup app data (Documents/Library) and restore it later.
-*   **Export/Import:** Manually select and import external saves.
+### 3. App Data Manager
+*   **Backup/Restore:** Easily backup app data (Documents/Library) to a local folder.
+*   **Native Integration:** Backups are visible in the iOS "Files" app (On My iPhone -> VansonMod), allowing easy export and import.
 
 ### 4. Process Manager
-*   View running User and System applications with icons.
-*   **Filter:** Automatically hides system extensions and widgets for a cleaner view.
+*   View running User and System applications with icons and version numbers.
+*   **Smart Filter:** Automatically hides system extensions and widgets for a cleaner view.
 *   **Control:** Attach to, Kill, or Launch apps directly.
 
-### 5. Hex Editor
-*   View raw memory in Hexadecimal and ASCII.
-*   **Row Editor:** Real-time editing with split views.
+### 5. Hex Editor 2.0
+*   **Split View:** View Hex and ASCII simultaneously with synchronized scrolling.
+*   **Row Editor:** Real-time editing for specific memory rows.
 *   **Navigation:** Infinite scrolling and jump to address.
 
 ---
 
 ## 📝 Changelog
+
+### v1.5 - Advanced Search & Hex Editor 2.0
+*   **Advanced Search:** Added **Fuzzy Search** (Unknown Initial Value -> Increased/Decreased) and **Group Search** (e.g., `500,1000`).
+*   **Batch Modify:** Support modifying all results with a **Fixed Value** or **Increment Value**.
+*   **Hex Editor 2.0:** Completely redesigned with Split View (Hex/ASCII), synchronized scrolling, and a new Row Editor.
+*   **App Data Manager:** Switched to folder-based backups for better stability and native Files app integration.
+*   **Process List:** Smart filtering (auto-hides system processes) and added App Version display.
+*   **UX:** Added Refresh buttons in Modifier and Memory Browser; Fixed Settings input bugs.
 
 ### v1.4 - Save Manager & Optimizations
 *   **New Feature:** Added Backup/Restore functionality for App Data.
@@ -127,14 +139,15 @@ Modify assembly instructions of running apps.
 
 This tool is for **educational purposes and security research only**.
 *   **Non-Commercial:** Do not use this tool for commercial gain or illegal activities.
-*   **Fair Play:** Please respect game developers. Do not use this tool to disrupt online multiplayer games.
-*   **Risk:** The developer is not responsible for any data loss, device issues, or bans resulting from the use of this tool.
+*   **Fair Play:** Please respect game developers and other players. Do not use this tool to disrupt the fairness of online multiplayer games.
+*   **Use at Your Own Risk:** The developer is not responsible for any data loss, device issues, or bans resulting from the use of this tool.
 
 ---
 
 ## ☕ Support & Donation
 
-**VansonMod is free.** If this tool helped you, please consider supporting the development! ❤️
+**VansonMod is free.** However, developing it involves a lot of effort and coffee.
+If this tool helped you, please consider supporting the development! ❤️
 
 | **Ko-fi (Global)** | **WeChat Pay (China)** |
 | :---: | :---: |
@@ -147,4 +160,3 @@ This tool is for **educational purposes and security research only**.
 [![Star History Chart](https://api.star-history.com/svg?repos=vaenshine/VansonMod&type=Date)](https://star-history.com/#vaenshine/VansonMod&Date)
 
 ---
-*Made with ❤️ by Vaenshine © 2025*
