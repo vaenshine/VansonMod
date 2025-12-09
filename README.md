@@ -82,6 +82,13 @@ Modify assembly instructions of running apps.
 
 ## 📝 Changelog
 
+### v1.6 - String Search & iPad Adaptation Optimization
+*   **String Search:** Added string search function (mainly applicable to debugging scenarios).
+*   **Archive Import:** Supports direct import of backup folders from the iOS "Files" App.
+*   **RVA Interface Upgrade:** Displays the main program base address (supports click-to-copy), and the input box features **intelligent fault tolerance**.
+*   **iPad Adaptation:** Fully adapted to iPad landscape mode and screen auto-rotation.
+*   **Interaction Optimization:** Overall interaction improved with the addition of a jump menu function.
+
 ### v1.5 - Advanced Search & Hex Editor 2.0
 *   **Advanced Search:** Added **Fuzzy Search** (Unknown Initial Value -> Increased/Decreased) and **Group Search** (e.g., `500,1000`).
 *   **Batch Modify:** Support modifying all results with a **Fixed Value** or **Increment Value**.
