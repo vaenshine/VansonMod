@@ -81,6 +81,7 @@ Modify assembly instructions of running apps.
 ---
 
 ## 📝 Changelog
+### v1.7 - Support fuzzy search and custom selection of search types
 
 ### v1.6 - String Search & iPad Adaptation Optimization
 *   **String Search:** Added string search function (mainly applicable to debugging scenarios).
