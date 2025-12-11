@@ -81,6 +81,9 @@ Modify assembly instructions of running apps.
 ---
 
 ## 📝 Changelog
+
+### v1.71 - Fix the matching deviation of fuzzy search, optimize the algorithm, and greatly enhance both search accuracy and efficiency.
+
 ### v1.7 - Support fuzzy search and custom selection of search types
 
 ### v1.6 - String Search & iPad Adaptation Optimization
