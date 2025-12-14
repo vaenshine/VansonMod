@@ -87,6 +87,7 @@ Modify assembly instructions of running apps.
 *   **Global Backup Manager:** Introduced a centralized "Backup Manager" in the App Manager tab. This allows users to view and manage all backups, including **"zombie data"** from previously uninstalled apps, facilitating easy export or deletion.
 *   **Process Search:** Added a search bar to the Process Selection tab (Tab 1), enabling quick filtering of processes by Name, BundleID, or PID.
 *   **Restore Workflow Optimization:** Upon a successful backup restore, the target application process is now automatically killed to ensure data consistency, removing the need for manual restarts.
+*   **Popup Interaction Optimization:** Unified the operation logic of the click pop-up for memory addresses in the favorite/lock module.
 
 ### v1.71 - Fix the matching deviation of fuzzy search, optimize the algorithm, and greatly enhance both search accuracy and efficiency.
 
