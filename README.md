@@ -82,6 +82,12 @@ Modify assembly instructions of running apps.
 
 ## 📝 Changelog
 
+### v1.72 - Hex Editor Overhaul & Backup Management
+*   **Hex Editor Overhaul:** Completely reconstructed the Hex Editor interface with a new **Split View** system (Hex Only / Split / Text Only), optimized screen real estate usage (zero margins), and improved visual alignment for better readability.
+*   **Global Backup Manager:** Introduced a centralized "Backup Manager" in the App Manager tab. This allows users to view and manage all backups, including **"zombie data"** from previously uninstalled apps, facilitating easy export or deletion.
+*   **Process Search:** Added a search bar to the Process Selection tab (Tab 1), enabling quick filtering of processes by Name, BundleID, or PID.
+*   **Restore Workflow Optimization:** Upon a successful backup restore, the target application process is now automatically killed to ensure data consistency, removing the need for manual restarts.
+
 ### v1.71 - Fix the matching deviation of fuzzy search, optimize the algorithm, and greatly enhance both search accuracy and efficiency.
 
 ### v1.7 - Support fuzzy search and custom selection of search types
