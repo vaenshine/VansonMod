@@ -82,6 +82,14 @@ Modify assembly instructions of running apps.
 
 ## 📝 Changelog
 
+### v1.80 - Theme Switch & iPad Split Screen, Search Experience Optimization
+*   **Theme Mode Addition:** Added a customizable theme mode that supports switching between **Follow System | Light | Dark** modes as needed.
+*   **Increment Modification Logic Fix:** Fixed the logic issue related to incremental value modification.
+*   **iPad Native Split Screen Support:** Added support for iPad native split screen (compatibility unconfirmed, works properly under Stage Manager).
+*   **Enter Key Trigger Search:** Implemented the function of triggering search with the Enter key for quicker operation.
+*   **Search Results Serial Number Display:** Added serial number display for search results to improve readability and navigation.
+*   **Lock List Enhancement & Bug Fix:** Added an independent switch for the lock list, and fixed the bug where value modification failed when the lock list was enabled.
+
 ### v1.72 - Hex Editor Overhaul & Backup Management
 *   **Hex Editor Overhaul:** Completely reconstructed the Hex Editor interface with a new **Split View** system (Hex Only / Split / Text Only), optimized screen real estate usage (zero margins), and improved visual alignment for better readability.
 *   **Global Backup Manager:** Introduced a centralized "Backup Manager" in the App Manager tab. This allows users to view and manage all backups, including **"zombie data"** from previously uninstalled apps, facilitating easy export or deletion.
