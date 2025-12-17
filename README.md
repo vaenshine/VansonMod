@@ -19,14 +19,38 @@
 
 ## 📖 Introduction
 
-**VansonMod** is a standalone Root Helper utility developed for the **TrollStore** environment.
+**VansonMod** is a standalone Root Helper tool designed specifically for the **TrollStore** environment.
 
-It allows you to modify game values (Health, Gold, etc.), manage app data, and patch assembly instructions (RVA) directly on your device. Unlike traditional tweaks that rely on code injection, VansonMod runs externally using Mach Kernel APIs to manipulate other running processes.
+Running externally via Mach Kernel APIs without code injection, it enables **memory modification without a jailbreak**. It features a powerful **Memory Modifier** (Exact/Fuzzy/Group/Nearby search, batch modification, float tolerance), **App Backup Manager** (one-click backup/restore of Documents/Library), **Smart Process Manager** (auto-detects TrollStore apps with localization support), and a professional **Hex Editor**. Additionally, for jailbroken users, it includes a **Cross-Process RVA Patcher** for live assembly instruction modification.
 
-### ⚠️ Compatibility Note
-*   **Memory Scanner / Data Manager:** Works on **ALL** devices (Jailbroken & Non-Jailbroken TrollStore users).
-*   **RVA Patcher:** Requires a **Jailbroken Environment** (e.g., Dopamine, Palera1n).
-    *   *Reason:* On stock iOS (TrollStore only), **AMFI** strictly enforces code signatures. Modifying executable code (`__TEXT`) without a jailbreak will cause the target app to crash.
+### ⚠️ Compatibility
+*   **Memory Mod / Backup**: ✅ Supports **All Devices** (including non-jailbroken TrollStore users).
+*   **RVA Patcher**: ⚠️ Requires **Jailbreak** (e.g., Dopamine, Palera1n) to function correctly.
+    *   *Reason:* On non-jailbroken devices, AMFI strict code signing enforcement will cause the target app to crash immediately upon modifying the executable code segment (`__TEXT`).
+
+---
+
+### ✨ Core Features
+
+*   **Memory Modifier**:
+    *   **Multi-Mode Search**: Exact, Fuzzy, Group (Ordered), Mixed Mode (Refine).
+    *   **Nearby Search**: Search relative to existing results with auto-deduplication.
+    *   **Batch Modify**: Global/Range select, Fixed or Increment modification.
+    *   **Smart Config**: Customizable Float Tolerance.
+    *   **Extras**: Value freezing, infinite memory browsing.
+*   **Process Manager**:
+    *   **Smart Filter**: Auto-detects User/TrollStore apps, hides system daemons.
+    *   **Localization**: Smartly displays localized App Names.
+    *   **Control**: Attach, Kill, Launch apps.
+*   **App Backup Manager**:
+    *   **Backup & Restore**: One-click Documents/Library backup, multiple slots.
+    *   **Native Integration**: Manage/Export/Import via iOS Files app.
+*   **Cross-Process RVA Patcher (JB Only)**:
+    *   **Live Patch**: Input Offset/Hex to patch running code.
+    *   **Safety**: Auto-handles memory permissions, built-in presets.
+*   **Hex Editor**:
+    *   **Split View**: Sync Hex/ASCII display.
+    *   **Edit**: Row editing and address jumping.
 
 ---
 
@@ -42,41 +66,6 @@ It allows you to modify game values (Health, Gold, etc.), manage app data, and p
   <img src="/Screenshots/AppManager.PNG" width="30%" alt="AppManager"/>
   <img src="/Screenshots/Settings.PNG" width="30%" alt="Settings"/>
 </p>
-
----
-
-## ✨ Features
-
-### 1. Memory Scanner
-A standard memory scanning tool.
-*   **Data Types:** Supports Int8, Int16, Int32, Int64, Float, and Double.
-*   **Search Modes:**
-    *   **Exact Search:** Find specific values.
-    *   **Fuzzy Search:** Search for unknown initial values (Increased / Decreased / Changed / Unchanged).
-    *   **Group Search:** Search for multiple values with specific distances (e.g., `500,1000`).
-*   **Batch Modify:** Modify all results with a **Fixed Value** or **Increment Value** (+1, +2...).
-*   **Locking:** Freeze values to prevent them from changing (Supports background locking).
-*   **Memory Browser:** View nearby memory values intuitively with infinite scrolling.
-
-### 2. Cross-Process RVA Patcher (Jailbreak Required)
-Modify assembly instructions of running apps.
-*   **Live Offset Patch:** Input the RVA Offset (from IDA/Hopper), and the tool calculates the absolute address based on the module's ASLR slide.
-*   **Safety:** Handles memory permissions (`RX` -> `RWX` -> `RX`) to ensure stability.
-*   **Presets:** Built-in common ARM64 hex codes.
-
-### 3. App Data Manager
-*   **Backup/Restore:** Easily backup app data (Documents/Library) to a local folder.
-*   **Native Integration:** Backups are visible in the iOS "Files" app (On My iPhone -> VansonMod), allowing easy export and import.
-
-### 4. Process Manager
-*   View running User and System applications with icons and version numbers.
-*   **Smart Filter:** Automatically hides system extensions and widgets for a cleaner view.
-*   **Control:** Attach to, Kill, or Launch apps directly.
-
-### 5. Hex Editor 2.0
-*   **Split View:** View Hex and ASCII simultaneously with synchronized scrolling.
-*   **Row Editor:** Real-time editing for specific memory rows.
-*   **Navigation:** Infinite scrolling and jump to address.
 
 ---
 
