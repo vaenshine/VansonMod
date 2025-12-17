@@ -33,13 +33,13 @@
 ## 📸 应用截图
 
 <p align="center">
-  <img src="/Screenshots/Select.PNG" width="30%" alt="Process Select"/>
+  <img src="/Screenshots/Apps.PNG" width="30%" alt="Apps"/>
   <img src="/Screenshots/Modifier.PNG" width="30%" alt="Modifier"/>
-  <img src="/Screenshots/HexEditor.PNG" width="30%" alt="HexEditor"/>
+  <img src="/Screenshots/HexSplitView.PNG" width="30%" alt="HexSplitView"/>
 </p>
 <p align="center">
-  <img src="/Screenshots/RowEditor.PNG" width="30%" alt="RowEditor"/>
-  <img src="/Screenshots/Rva Patcher.PNG" width="30%" alt="RVA Patcher"/>
+  <img src="/Screenshots/RvaPatcher.PNG" width="30%" alt="RvaPatcher"/>
+  <img src="/Screenshots/AppManager.PNG" width="30%" alt="AppManager"/>
   <img src="/Screenshots/Settings.PNG" width="30%" alt="Settings"/>
 </p>
 
