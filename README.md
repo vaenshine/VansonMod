@@ -82,66 +82,100 @@ Modify assembly instructions of running apps.
 
 ## 📝 Changelog
 
-### v1.80 - Theme Switch & iPad Split Screen, Search Experience Optimization
+### v1.9 - Added Nearby Search & Multi-mode Search Optimized Retrieval Efficiency and Batch Modification
+*   **Added Nearby Search**：Scan adjacent memory of existing results to precisely locate related addresses.
+*   **Fuzzy Search Speed Boost**：Fuzzy search speed boosted again, cutting retrieval time for a smoother experience.
+*   **Multi-mode Hybrid Search Supported**：No longer restricted to a single search mode; freely switch modes for continued retrieval.
+*   **Enhanced Combined Search**：Follows the memory sequence priority principle—mismatched condition order in memory may result in retrieval failures.
+*   **Optimized Batch Modification**：Added range selection feature to freely specify modification scopes for more intuitive operations.
+*   **New Settings Added**：Combined Search Range, Search Result Display Settings (for those who need to display 10 billion results, you're in luck!) & Floating-Point Error Adjustment.
+*   **Improved Stability**：Fixed several known issues and improved overall app stability.
+
+<details>
+<summary>v1.80 - Theme Switch & iPad Split Screen, Search Experience Optimization</summary>
+
 *   **Theme Mode Addition:** Added a customizable theme mode that supports switching between **Follow System | Light | Dark** modes as needed.
 *   **Increment Modification Logic Fix:** Fixed the logic issue related to incremental value modification.
 *   **iPad Native Split Screen Support:** Added support for iPad native split screen (compatibility unconfirmed, works properly under Stage Manager).
 *   **Enter Key Trigger Search:** Implemented the function of triggering search with the Enter key for quicker operation.
 *   **Search Results Serial Number Display:** Added serial number display for search results to improve readability and navigation.
 *   **Lock List Enhancement & Bug Fix:** Added an independent switch for the lock list, and fixed the bug where value modification failed when the lock list was enabled.
+</details>
 
-### v1.72 - Hex Editor Overhaul & Backup Management
+<details>
+<summary>v1.72 - Hex Editor Overhaul & Backup Management</summary>
+
 *   **Hex Editor Overhaul:** Completely reconstructed the Hex Editor interface with a new **Split View** system (Hex Only / Split / Text Only), optimized screen real estate usage (zero margins), and improved visual alignment for better readability.
 *   **Global Backup Manager:** Introduced a centralized "Backup Manager" in the App Manager tab. This allows users to view and manage all backups, including **"zombie data"** from previously uninstalled apps, facilitating easy export or deletion.
 *   **Process Search:** Added a search bar to the Process Selection tab (Tab 1), enabling quick filtering of processes by Name, BundleID, or PID.
 *   **Restore Workflow Optimization:** Upon a successful backup restore, the target application process is now automatically killed to ensure data consistency, removing the need for manual restarts.
 *   **Popup Interaction Optimization:** Unified the operation logic of the click pop-up for memory addresses in the favorite/lock module.
+</details>
 
 ### v1.71 - Fix the matching deviation of fuzzy search, optimize the algorithm, and greatly enhance both search accuracy and efficiency.
 
 ### v1.7 - Support fuzzy search and custom selection of search types
 
-### v1.6 - String Search & iPad Adaptation Optimization
+<details>
+<summary>v1.6 - String Search & iPad Adaptation Optimization</summary>
+
 *   **String Search:** Added string search function (mainly applicable to debugging scenarios).
 *   **Archive Import:** Supports direct import of backup folders from the iOS "Files" App.
 *   **RVA Interface Upgrade:** Displays the main program base address (supports click-to-copy), and the input box features **intelligent fault tolerance**.
 *   **iPad Adaptation:** Fully adapted to iPad landscape mode and screen auto-rotation.
 *   **Interaction Optimization:** Overall interaction improved with the addition of a jump menu function.
+</details>
 
-### v1.5 - Advanced Search & Hex Editor 2.0
+<details>
+<summary>v1.5 - Advanced Search & Hex Editor 2.0</summary>
+
 *   **Advanced Search:** Added **Fuzzy Search** (Unknown Initial Value -> Increased/Decreased) and **Group Search** (e.g., `500,1000`).
 *   **Batch Modify:** Support modifying all results with a **Fixed Value** or **Increment Value**.
 *   **Hex Editor 2.0:** Completely redesigned with Split View (Hex/ASCII), synchronized scrolling, and a new Row Editor.
 *   **App Data Manager:** Switched to folder-based backups for better stability and native Files app integration.
 *   **Process List:** Smart filtering (auto-hides system processes) and added App Version display.
 *   **UX:** Added Refresh buttons in Modifier and Memory Browser; Fixed Settings input bugs.
+</details>
 
-### v1.4 - Save Manager & Optimizations
+<details>
+<summary>v1.4 - Save Manager & Optimizations</summary>
+
 *   **New Feature:** Added Backup/Restore functionality for App Data.
 *   **New Feature:** Added "Check for Updates" in Settings.
 *   **Optimization:** Improved process classification logic.
 *   **Fix:** Resolved an issue where process filtering would fail.
 *   **Stability:** Enhanced overall stability and fixed various crashes.
+</details>
 
-### v1.3 - Stability & Feature Expansion
+<details>
+<summary>v1.3 - Stability & Feature Expansion</summary>
+
 *   **Stability:** Enhanced app stability and resolved crash issues.
 *   **Process Filtering:** Added filtering to exclude system processes/widgets.
 *   **Modifier:** Optimized the Modifier module and added a refresh function.
 *   **New Feature:** Memory Browser (Value) for intuitive viewing.
+</details>
 
-### v1.2 - Feature Enhancement & UI/UX
+<details>
+<summary>v1.2 - Feature Enhancement & UI/UX</summary>
+
 *   **Hex Editor:** Added inline editing (Row Editor) with real-time preview.
 *   **UI Optimization:** Refined interface design.
 *   **Favorites:** Added a dedicated button and management features (Edit Note/Delete).
 *   **Fix:** Resolved specific crash issues.
+</details>
 
-### v1.1 - Safety Update
+<details>
+<summary>v1.1 - Safety Update</summary>
 *   **RVA Safety Check:** Added environment detection. Warns non-jailbroken users before patching to prevent AMFI-caused crashes.
 *   **Optimization:** Improved stability during process switching.
+</details>
 
-### v1.0 - Initial Release
+<details>
+<summary>v1.0 - Initial Release</summary>
 *   First public release for TrollStore.
 *   Basic Memory Scanner, RVA Patcher, Process Manager, and Hex Editor.
+</details>
 
 ---
 
