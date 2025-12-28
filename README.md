@@ -66,18 +66,9 @@ Unlike traditional jailbreak tweaks, it runs externally using Mach kernel APIs w
 
 ## 📸 Screenshots
 
-<p align="center">
-  <img src="/Screenshots/APP_SELECT.PNG" width="30%" alt="APP_SELECT"/>
-  <img src="/Screenshots/MEM_BROWSER.PNG" width="30%" alt="MEM_BROWSER"/>
-  <img src="/Screenshots/MEM_DEBUG.PNG" width="30%" alt="MEM_DEBUG"/>
-  <img src="/Screenshots/MEM_HEX_MIX.PNG" width="30%" alt="MEM_HEX_MIX"/>
-</p>
-<p align="center">
-  <img src="/Screenshots/RVA_MANAGER.PNG" width="30%" alt="RVA_MANAGER"/>
-  <img src="/Screenshots/POINTER_ANALYSIS.PNG" width="30%" alt="POINTER_ANALYSIS"/>
-  <img src="/Screenshots/POINTER_VERIFY.PNG" width="30%" alt="POINTER_VERIFY"/>
-  <img src="/Screenshots/POINTER_LOCKER.PNG" width="30%" alt="POINTER_LOCKER"/>
-</p>
+| <div align="center"><img src="/Screenshots/APP_SELECT.PNG" width="100%" alt="APP_SELECT"/></div> | <div align="center"><img src="/Screenshots/MEM_BROWSER.PNG" width="100%" alt="MEM_BROWSER"/></div> | <div align="center"><img src="/Screenshots/MEM_DEBUG.PNG" width="100%" alt="MEM_DEBUG"/></div> | <div align="center"><img src="/Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="MEM_HEX_MIX"/></div> |
+| :----------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------: |
+| <div align="center"><img src="/Screenshots/RVA_MANAGER.PNG" width="100%" alt="RVA_MANAGER"/></div> | <div align="center"><img src="/Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="POINTER_ANALYSIS"/></div> | <div align="center"><img src="/Screenshots/POINTER_VERIFY.PNG" width="100%" alt="POINTER_VERIFY"/></div> | <div align="center"><img src="/Screenshots/POINTER_LOCKER.PNG" width="100%" alt="POINTER_LOCKER"/></div> |
 
 ---
 
