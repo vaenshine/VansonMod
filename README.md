@@ -83,24 +83,44 @@ Unlike traditional jailbreak tweaks, it runs externally using Mach kernel APIs w
 
 ## 📝 Historical Changelog
 
-### v2.1 - Core Architecture Fixes & Multi-Module Experience Optimization
-1.  **Core & Stability**
-    - Resolved data crossover issue between **Memory Debugging** and **Pointer Search**.
-2.  **Modifier (Memory Debugger)**
-    - Enhanced Fuzzy Search: Added "Value has increased by..." and "Value has decreased by..." search options, supporting input of specific changed values.
-    - Optimized Batch Operations: Added batch lock, batch favorite, and batch delete functions.
-    - UI Enhancement: Replaced text labels with icons in "Batch Selection" mode to save space (Select All/Inverse, Favorite, Lock, Modify, Delete).
-    - Improved Reset Experience: Clicking reset only clears search data while retaining search mode (Exact/Fuzzy) and data type selection, improving continuous debugging efficiency.
-3.  **Patcher (RVA Debugging)**
-    - Fixed the delete function and resolved data duplication caused by pull-to-refresh.
-4.  **Verifier (Pointer Validator)**
-    - Data Type Selection Support: Added a data type selector on the main interface (covering types from I8 to F64).
-    - Silent Save Function: After successful pointer verification, valid pointers are automatically filtered and saved as a new pointer verification file for easy progress tracking.
-5.  **Pointer Search**
-    - Fixed navigation issues in manual pointer search, resolving unresponsive UI, inability to return from multi-level (Lv2+) pages, and non-clickable buttons.
-6.  **General Optimizations**
-    - Landscape Mode Support: Unlocked App rotation restrictions, perfectly adapting to iPad/iPhone landscape operation; Maintains landscape display when switching back to VM in landscape mode.
-    - Interaction Refinements: Added "Edit Note" function for address locking and memory locking; Added empty selection prompts for batch operation scenarios.
+### v2.2 - Function Upgrade & Experience Optimization
+- New Signature Code Function: The signature code function is newly launched to help locate and analyze memory data more accurately.
+- Significant Upgrade of Pointer Search Performance: The speed and accuracy of pointer search are fully optimized, achieving a qualitative leap compared with the initial version of V2.0.
+- Comprehensive Upgrade of Joint Search: Multiple new input methods are added, and the anchor radiation function is introduced at the same time, which can display special numbers first. Combined with the improved search speed, the retrieval efficiency is greatly improved.
+- Full Restructuring of Memory Debugging Tab UI: Optimize the interface layout and interaction logic to bring a smoother debugging experience; meanwhile, the range search function of V1.9 is returned to the batch selection module, and a floating toolbar for batch selection is added for more convenient operation.
+- Experience Optimization of RVA Debugging Page: Reconstruct the RVA debugging page, optimize the framework selection logic, make the interface layout more loose and reasonable, and the operation space more comfortable.
+- Optimization of Menu Function Structure: Remove the pointer debugging option in the original menu and integrate the toolbox function into this position; the toolbox now centrally manages all saved data for unified viewing and calling. Note: The entry for pointer and signature code related functions can only be accessed by jumping from the memory address.
+- Enhancement of Search Results and Browsing Functions: Optimize the jump function of search results, add memory browsing and hexadecimal (Hex) browsing record marks, making the browsing track clear at a glance, so there is no need to manually distinguish which ones have been viewed or not.
+- Fix the Problem of Random Page Jumping in Memory Browsing: Special repair for the problem of random page jumping during memory browsing, please experience and verify the specific effect by yourself.
+
+<details>
+<summary>v2.1 - Core Architecture Fixes & Multi-Module Experience Optimization</summary>
+<ul>
+  <li><strong>Core & Stability</strong>: Resolved data crossover issue between <strong>Memory Debugging</strong> and <strong>Pointer Search</strong>.</li>
+  <li><strong>Modifier (Memory Debugger)</strong>: 
+    <ul>
+      <li>Enhanced Fuzzy Search: Added "Value has increased by..." and "Value has decreased by..." search options, supporting input of specific changed values.</li>
+      <li>Optimized Batch Operations: Added batch lock, batch favorite, and batch delete functions.</li>
+      <li>UI Enhancement: Replaced text labels with icons in "Batch Selection" mode to save space (Select All/Inverse, Favorite, Lock, Modify, Delete).</li>
+      <li>Improved Reset Experience: Clicking reset only clears search data while retaining search mode (Exact/Fuzzy) and data type selection, improving continuous debugging efficiency.</li>
+    </ul>
+  </li>
+  <li><strong>Patcher (RVA Debugging)</strong>: Fixed the delete function and resolved data duplication caused by pull-to-refresh.</li>
+  <li><strong>Verifier (Pointer Validator)</strong>: 
+    <ul>
+      <li>Data Type Selection Support: Added a data type selector on the main interface (covering types from I8 to F64).</li>
+      <li>Silent Save Function: After successful pointer verification, valid pointers are automatically filtered and saved as a new pointer verification file for easy progress tracking.</li>
+    </ul>
+  </li>
+  <li><strong>Pointer Search</strong>: Fixed navigation issues in manual pointer search, resolving unresponsive UI, inability to return from multi-level (Lv2+) pages, and non-clickable buttons.</li>
+  <li><strong>General Optimizations</strong>: 
+    <ul>
+      <li>Landscape Mode Support: Unlocked App rotation restrictions, perfectly adapting to iPad/iPhone landscape operation; Maintains landscape display when switching back to VM in landscape mode.</li>
+      <li>Interaction Refinements: Added "Edit Note" function for address locking and memory locking; Added empty selection prompts for batch operation scenarios.</li>
+    </ul>
+  </li>
+</ul>
+</details>
 
 <details>
 <summary>v2.0 - New Pointer Search & RVA Management, Optimized Tablet Adaptation and Core Experience</summary>
