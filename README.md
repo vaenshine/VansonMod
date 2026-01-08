@@ -83,6 +83,10 @@ Unlike traditional jailbreak tweaks, it runs externally using Mach kernel APIs w
 
 ## 📝 Historical Changelog
 
+### v2.2.1
+- Fixed crash when editing signature codes
+- Fixed failure to export pointers
+
 ### v2.2 - Function Upgrade & Experience Optimization
 - New Signature Code Function: The signature code function is newly launched to help locate and analyze memory data more accurately.
 - Significant Upgrade of Pointer Search Performance: The speed and accuracy of pointer search are fully optimized, achieving a qualitative leap compared with the initial version of V2.0.
