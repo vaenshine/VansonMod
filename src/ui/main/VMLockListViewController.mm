@@ -3745,6 +3745,11 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   NSString *valToWrite = chain.lockValue ?: TR(@"Default_Value");
   VMDataType type = (chain.lockType == 0) ? VMDataTypeInt32 : (VMDataType)chain.lockType;
   uint64_t finalAddr = [self forceResolveChain:chain];
+  if (finalAddr == 0 && chain.bundleID.length > 0 &&
+      [self tryReconnectForBundleID:chain.bundleID]) {
+    [[VMMemoryEngine shared] loadRemoteModules];
+    finalAddr = [self forceResolveChain:chain];
+  }
   if (finalAddr > 0) {
     [[VMMemoryEngine shared] writeAddress:finalAddr value:valToWrite type:type];
     NSString *typeStr = [self typeNameForType:type];

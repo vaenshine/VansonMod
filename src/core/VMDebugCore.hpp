@@ -123,6 +123,10 @@ private:
     std::mutex _hitMutex;
     std::thread _listenerThread;
     WatchHitCallback _hitCallback;
+    uint32_t _lastHitIndex = UINT32_MAX;
+    uint64_t _lastHitPc = 0;
+    uint64_t _lastHitAddress = 0;
+    double _lastHitTimestamp = 0;
 
     struct RemoteModule {
         uint64_t loadAddress;

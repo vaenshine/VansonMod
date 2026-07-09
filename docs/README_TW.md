@@ -120,4 +120,4 @@ GPL-3.0。詳見 [LICENSE](./LICENSE)。
 
 ## Star 趨勢
 
-[![Star History Chart](https://api.star-history.com/svg?repos=vaenshine/VansonMod&type=Date)](https://star-history.com/#vaenshine/VansonMod&Date)
+[![Star History Chart](https://api.star-history.com/chart?repos=vaenshine/VansonMod&type=date&legend=bottom-right&sealed_token=7GKlgSNa_RYfyFti6u-PKeTxObIt1P6yp9ExhaBjWXgxI78k9FV3xLprlOPWX_Rx4DkQRZ_ub-lWHoqPsTekAaDxkiZKMUhSqDuSCrqhTDn9cR8jQAE_pQ)](https://www.star-history.com/?repos=vaenshine%2FVansonMod&type=date&legend=bottom-right)

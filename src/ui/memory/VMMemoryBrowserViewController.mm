@@ -235,9 +235,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     if (self.isStrMode) {
         [self loadStrData];
         [self.tableView reloadData];
-        if (self.strDataList.count > 0) {
-            [self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0] atScrollPosition:UITableViewScrollPositionTop animated:NO];
-        }
+        [self scrollToTargetAndHighlight];
     } else {
         self.minAddr = self.targetAddress - (PAGE_COUNT * self.typeSize);
         self.maxAddr = self.targetAddress + (PAGE_COUNT * self.typeSize);
@@ -273,8 +271,25 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     self.strMinAddr = scanStart;
     self.strMaxAddr = scanEnd;
     
+    VMScanResultItem *targetItem = [self stringItemAtAddress:self.targetAddress fallback:nil];
+    if (targetItem) {
+        [self.strDataList addObject:targetItem];
+    }
+
     NSArray *results = [self scanStringsFrom:scanStart to:scanEnd];
-    [self.strDataList addObjectsFromArray:results];
+    for (VMScanResultItem *item in results) {
+        if (item.address == self.targetAddress) {
+            if (self.strDataList.count > 0) {
+                VMScanResultItem *existing = self.strDataList[0];
+                existing.valueStr = item.valueStr;
+                existing.originalSize = item.originalSize;
+            } else {
+                [self.strDataList addObject:item];
+            }
+            continue;
+        }
+        [self.strDataList addObject:item];
+    }
 }
 
 - (void)loadMoreStrData:(BOOL)next {
@@ -440,6 +455,20 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     return str;
 }
 
+- (VMScanResultItem *)stringItemAtAddress:(uint64_t)address fallback:(NSString *)fallback {
+    NSUInteger len = 0;
+    NSString *value = [self readVisibleStringAtAddress:address
+                                             fallback:fallback
+                                            lengthOut:&len];
+    if (!value && !fallback) return nil;
+
+    VMScanResultItem *item = [VMScanResultItem new];
+    item.address = address;
+    item.valueStr = value ?: (fallback ?: @"");
+    item.originalSize = len;
+    return item;
+}
+
 - (void)refreshVisibleDataSilently {
     if (!self.isViewLoaded || !self.view.window || self.isLoading || self.isInitialLoad) return;
     if (self.tableView.dragging || self.tableView.decelerating) return;
@@ -533,10 +562,14 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             uint64_t addr = VMParseAddressInput(txt);
             self.targetAddress = addr;
-            self.minAddr = self.targetAddress - (PAGE_COUNT * self.typeSize);
-            self.maxAddr = self.targetAddress + (PAGE_COUNT * self.typeSize);
-            self.dataList = [NSMutableArray array];
-            [self loadInitialData];
+            if (self.isStrMode) {
+                [self loadStrData];
+            } else {
+                self.minAddr = self.targetAddress - (PAGE_COUNT * self.typeSize);
+                self.maxAddr = self.targetAddress + (PAGE_COUNT * self.typeSize);
+                self.dataList = [NSMutableArray array];
+                [self loadInitialData];
+            }
             [self.tableView reloadData];
             [self scrollToTargetAndHighlight];
         });
@@ -562,10 +595,14 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             self.targetAddress = newAddr;
-            self.minAddr = self.targetAddress - (PAGE_COUNT * self.typeSize);
-            self.maxAddr = self.targetAddress + (PAGE_COUNT * self.typeSize);
-            self.dataList = [NSMutableArray array];
-            [self loadInitialData];
+            if (self.isStrMode) {
+                [self loadStrData];
+            } else {
+                self.minAddr = self.targetAddress - (PAGE_COUNT * self.typeSize);
+                self.maxAddr = self.targetAddress + (PAGE_COUNT * self.typeSize);
+                self.dataList = [NSMutableArray array];
+                [self loadInitialData];
+            }
             [self.tableView reloadData];
             [self scrollToTargetAndHighlight];
         });
@@ -696,8 +733,9 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 
 - (void)scrollToTargetAndHighlight {
     NSInteger targetIndex = -1;
-    for (int i = 0; i < self.dataList.count; i++) {
-        VMScanResultItem *item = self.dataList[i];
+    NSArray *list = self.isStrMode ? self.strDataList : self.dataList;
+    for (int i = 0; i < list.count; i++) {
+        VMScanResultItem *item = list[i];
         if (item.address == self.targetAddress) { targetIndex = i; break; }
     }
     
@@ -735,6 +773,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
             cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
         }
         VMScanResultItem *item = self.strDataList[indexPath.row];
+        BOOL isTargetRow = (item.address == self.targetAddress);
         cell.textLabel.text = [NSString stringWithFormat:@"0x%llX [%lu]", item.address, (unsigned long)item.originalSize];
         NSString *display = item.valueStr;
         if (display.length > 40) display = [[display substringToIndex:40] stringByAppendingString:@"..."];
@@ -742,7 +781,9 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         cell.detailTextLabel.textColor = [UIColor systemGreenColor];
         cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
-        cell.backgroundColor = [UIColor clearColor];
+        cell.backgroundColor = isTargetRow
+            ? [[UIColor systemYellowColor] colorWithAlphaComponent:0.2]
+            : [UIColor clearColor];
         cell.accessoryType = UITableViewCellAccessoryNone;
         return cell;
     }
@@ -808,7 +849,19 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     
     if (self.isStrMode) {
         VMScanResultItem *item = self.strDataList[indexPath.row];
-        [self showStrEditAlert:item indexPath:indexPath];
+        NSString *liveVal = [self readVisibleStringAtAddress:item.address
+                                                    fallback:item.valueStr
+                                                   lengthOut:NULL];
+        item.valueStr = liveVal ?: (item.valueStr ?: @"");
+        [tableView reloadRowsAtIndexPaths:@[ indexPath ]
+                         withRowAnimation:UITableViewRowAnimationNone];
+        [VMMemoryActionSheet showActionSheetForAddress:item.address
+                                                value:item.valueStr
+                                             dataType:VMDataTypeString
+                                   fromViewController:self
+                                           sourceView:tableView
+                                           sourceRect:[tableView rectForRowAtIndexPath:indexPath]
+                                            extraItem:nil];
         return;
     }
     

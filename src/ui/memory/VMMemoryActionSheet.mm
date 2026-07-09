@@ -21,6 +21,42 @@
 @end
 
 @implementation VMMemoryActionSheet
+static const NSUInteger VM_STRING_EDIT_MAX_LEN = 8192;
+
++ (BOOL)isVisibleStringByte:(uint8_t)b {
+  return (b >= 0x20 && b <= 0x7E) || b >= 0xC0;
+}
+
++ (NSString *)visibleStringAtAddress:(uint64_t)address
+                            fallback:(NSString *)fallback
+                           lengthOut:(NSUInteger *)lengthOut {
+  NSData *data = [[VMMemoryEngine shared] readRawMemory:address
+                                                 length:VM_STRING_EDIT_MAX_LEN];
+  NSUInteger fallbackLen = [fallback lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+  if (data.length == 0) {
+    if (lengthOut) *lengthOut = fallbackLen;
+    return fallback ?: @"";
+  }
+
+  const uint8_t *bytes = (const uint8_t *)data.bytes;
+  NSUInteger len = 0;
+  while (len < data.length && len < VM_STRING_EDIT_MAX_LEN) {
+    if (bytes[len] == '\0') break;
+    if (![self isVisibleStringByte:bytes[len]]) break;
+    len++;
+  }
+  if (len == 0) {
+    if (lengthOut) *lengthOut = fallbackLen;
+    return fallback ?: @"";
+  }
+
+  NSString *str = [[NSString alloc] initWithBytes:bytes
+                                           length:len
+                                         encoding:NSUTF8StringEncoding];
+  if (lengthOut) *lengthOut = str ? len : fallbackLen;
+  return str ?: (fallback ?: @"");
+}
+
 + (UIViewController *)getTopViewController {
   UIWindow *window = nil;
   if (@available(iOS 13.0, *)) {
@@ -202,15 +238,12 @@
                                  }]];
   }
 
-  if (type != VMDataTypeString) {
-    [alert addAction:[UIAlertAction actionWithTitle:TR(@"Tab_Ptr_Analysis")
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction *a) {
-                                              [self
-                                                  launchPointerSearchFrom:vc
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Tab_Ptr_Analysis")
+                                            style:UIAlertActionStyleDefault
+                                          handler:^(UIAlertAction *a) {
+                                            [self launchPointerSearchFrom:vc
                                                             targetAddress:addr];
-                                            }]];
-  }
+                                          }]];
 
   if ([VMDebugEngine isAvailable]) {
     [alert addAction:[UIAlertAction
@@ -388,6 +421,11 @@
 
   [vc.view endEditing:YES];
 
+  if (type == VMDataTypeString) {
+    [self showStringModifyAlert:address val:val inVC:vc];
+    return;
+  }
+
   NSString *msg =
       [NSString stringWithFormat:TR(@"Alert_Edit_Addr_Msg"), address];
   UIAlertController *alert =
@@ -441,6 +479,91 @@
                                             style:UIAlertActionStyleCancel
                                           handler:nil]];
 
+  [self safePresentAlert:alert from:vc];
+}
+
++ (void)showStringModifyAlert:(uint64_t)address
+                          val:(NSString *)val
+                         inVC:(UIViewController *)vc {
+  NSUInteger originalLen = 0;
+  NSString *raw = [self visibleStringAtAddress:address
+                                      fallback:val
+                                     lengthOut:&originalLen];
+  NSString *addrMsg = [NSString stringWithFormat:TR(@"Alert_Edit_Addr_Msg"), address];
+  NSString *msg = [NSString stringWithFormat:@"%@\n%@ %lu\n\n\n\n\n\n\n\n\n\n",
+                                             addrMsg,
+                                             TR(@"Browser_Str_OrigLen"),
+                                             (unsigned long)originalLen];
+  UIAlertController *alert =
+      [UIAlertController alertControllerWithTitle:TR(@"Browser_Str_Edit")
+                                          message:msg
+                                   preferredStyle:UIAlertControllerStyleAlert];
+
+  UITextView *textView = [[UITextView alloc] initWithFrame:CGRectZero];
+  textView.text = raw ?: @"";
+  textView.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
+  textView.layer.borderWidth = 0.5;
+  textView.layer.borderColor = [UIColor.separatorColor CGColor];
+  textView.layer.cornerRadius = 6.0;
+  textView.translatesAutoresizingMaskIntoConstraints = NO;
+  [alert.view addSubview:textView];
+  [NSLayoutConstraint activateConstraints:@[
+    [textView.leadingAnchor constraintEqualToAnchor:alert.view.leadingAnchor constant:18],
+    [textView.trailingAnchor constraintEqualToAnchor:alert.view.trailingAnchor constant:-18],
+    [textView.topAnchor constraintEqualToAnchor:alert.view.topAnchor constant:104],
+    [textView.heightAnchor constraintEqualToConstant:220],
+  ]];
+
+  __weak __typeof(vc) weakVC = vc;
+  void (^writeBlock)(NSString *) = ^(NSString *newVal) {
+    NSString *oldVal = raw ?: @"";
+    NSUInteger newLen = [newVal lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+    NSUInteger oldSize = MAX(originalLen + 1, newLen + 1);
+    NSData *oldData = [[VMMemoryEngine shared] readRawMemory:address length:oldSize];
+    [[VMMemoryEngine shared] rememberManualWriteUndoAtAddress:address
+                                                        type:VMDataTypeString
+                                                    oldValue:oldVal
+                                                     oldData:oldData
+                                                    newValue:newVal];
+    [[VMMemoryEngine shared] writeAddress:address value:newVal type:VMDataTypeString];
+    [self showToast:TR(@"Msg_Mod_Success") inVC:weakVC];
+    if ([weakVC respondsToSelector:@selector(doRefreshValues)]) {
+      [weakVC performSelector:@selector(doRefreshValues)];
+    }
+  };
+
+  [alert addAction:[UIAlertAction
+                       actionWithTitle:TR(@"Btn_Confirm")
+                                 style:UIAlertActionStyleDestructive
+                               handler:^(UIAlertAction *a) {
+                                 NSString *newVal = textView.text ?: @"";
+                                 NSUInteger newLen = [newVal lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+                                 if (newLen > originalLen) {
+                                   NSString *warnMsg =
+                                       [NSString stringWithFormat:TR(@"Browser_Str_Overflow_Msg"),
+                                                                  (unsigned long)originalLen,
+                                                                  (unsigned long)newLen];
+                                   UIAlertController *warn =
+                                       [UIAlertController alertControllerWithTitle:TR(@"Browser_Str_Overflow")
+                                                                           message:warnMsg
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                                   [warn addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
+                                                                           style:UIAlertActionStyleCancel
+                                                                         handler:nil]];
+                                   [warn addAction:[UIAlertAction actionWithTitle:TR(@"Browser_Str_Force_Write")
+                                                                           style:UIAlertActionStyleDestructive
+                                                                         handler:^(UIAlertAction *a2) {
+                                                                           writeBlock(newVal);
+                                                                         }]];
+                                   [self safePresentAlert:warn from:weakVC];
+                                 } else {
+                                   writeBlock(newVal);
+                                 }
+                               }]];
+
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
+                                            style:UIAlertActionStyleCancel
+                                          handler:nil]];
   [self safePresentAlert:alert from:vc];
 }
 

@@ -44,6 +44,8 @@ struct GroupItem {
   } value, minValue, maxValue;
   bool relative; 
   bool isRange;
+  bool isWildcard;
+  uint64_t skipBytes;
 };
 
 enum class FilterMode {

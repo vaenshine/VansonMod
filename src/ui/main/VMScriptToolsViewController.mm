@@ -67,7 +67,7 @@
     @{@"name" : TR(@"Script_Shortcut_Search"), @"code" : @"vm.search('100', 'I32', '0x100000000', '0x200000000');"},
     @{@"name" : TR(@"Script_Shortcut_Refine"), @"code" : @"vm.refine('100', 'I32', 'eq');"},
     @{@"name" : TR(@"Script_Shortcut_Fuzzy"), @"code" : @"vm.searchFuzzy('I32');"},
-    @{@"name" : TR(@"Script_Shortcut_Group"), @"code" : @"vm.searchGroup('100; 200 f32::48', 'I32', '0x100000000', '0x200000000');"},
+    @{@"name" : TR(@"Script_Shortcut_Group"), @"code" : @"vm.searchGroup('1; *; 3::50', 'I32', '0x100000000', '0x200000000');\nvm.search('4:100 w:8 4:50', 'I32');"},
     @{@"name" : TR(@"Script_Shortcut_Nearby"), @"code" : @"vm.nearby('100', 'I32', 50);"},
     @{@"name" : TR(@"Script_Shortcut_Sign"), @"code" : @"vm.searchSign('E0 03 ?? 2A', '0x100000000', '0x200000000');"},
     @{@"name" : TR(@"Script_Shortcut_Between"), @"code" : @"vm.searchBetween('90', '100', 'I32');"},

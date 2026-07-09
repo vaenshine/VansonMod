@@ -168,6 +168,9 @@ static double groupFloatValue(const GroupItem::Value &value, DataType type) {
 
 static bool matchGroupItemValue(const void *ptr, const GroupItem &item,
                                 double floatTolerance) {
+  if (item.isWildcard)
+    return true;
+
   if (isFloatingDataType(item.type)) {
     double value = item.type == DataType::Float ? (double)(*(const float *)ptr)
                                                 : *(const double *)ptr;
@@ -215,6 +218,109 @@ static bool matchGroupItemValue(const void *ptr, const GroupItem &item,
          (item.type == DataType::Int64 &&
           (((uint64_t)value) & 0xFFFFFFFFFFFFULL) ==
               (((uint64_t)target) & 0xFFFFFFFFFFFFULL));
+}
+
+static std::string trimGroupToken(const std::string &input) {
+  std::string s = input;
+  size_t first = s.find_first_not_of(" \t\n\r");
+  if (first == std::string::npos)
+    return "";
+  size_t last = s.find_last_not_of(" \t\n\r");
+  return s.substr(first, last - first + 1);
+}
+
+static bool isWildcardGroupToken(const std::string &s) {
+  return s == "*" || s == "?";
+}
+
+static bool parseGroupSkipToken(const std::string &s, uint64_t &skipBytes) {
+  std::string lower = s;
+  std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+  if (lower.rfind("w:", 0) != 0)
+    return false;
+  std::string num = lower.substr(2);
+  try {
+    skipBytes = (num.rfind("0x", 0) == 0) ? std::stoull(num, nullptr, 16)
+                                          : std::stoull(num);
+    return true;
+  } catch (...) {
+    skipBytes = 0;
+    return true;
+  }
+}
+
+static bool dataTypeFromBytePrefix(const std::string &prefix, DataType &type) {
+  if (prefix == "1") {
+    type = DataType::Int8;
+    return true;
+  }
+  if (prefix == "2") {
+    type = DataType::Int16;
+    return true;
+  }
+  if (prefix == "4") {
+    type = DataType::Int32;
+    return true;
+  }
+  if (prefix == "8") {
+    type = DataType::Int64;
+    return true;
+  }
+  return false;
+}
+
+static bool stripGroupBytePrefix(std::string &valStr, DataType &type) {
+  size_t colon = valStr.find(':');
+  if (colon == std::string::npos)
+    return false;
+  std::string prefix = trimGroupToken(valStr.substr(0, colon));
+  if (prefix.empty() ||
+      prefix.find_first_not_of("0123456789") != std::string::npos)
+    return false;
+  DataType parsedType = type;
+  if (!dataTypeFromBytePrefix(prefix, parsedType))
+    return false;
+  type = parsedType;
+  valStr = trimGroupToken(valStr.substr(colon + 1));
+  return true;
+}
+
+static bool groupUsesLayoutMode(const std::vector<GroupItem> &items) {
+  for (const GroupItem &item : items) {
+    if (item.isWildcard || item.skipBytes > 0)
+      return true;
+  }
+  return false;
+}
+
+static bool matchGroupLayoutAt(uint8_t *memBuffer, size_t readSize,
+                               size_t startOffset,
+                               const std::vector<GroupItem> &items,
+                               double floatTolerance,
+                               std::vector<std::pair<uint64_t, size_t>> &matches,
+                               uint64_t chunkBase) {
+  size_t cursor = startOffset;
+  matches.clear();
+  for (size_t i = 0; i < items.size(); ++i) {
+    const GroupItem &item = items[i];
+    if (item.skipBytes > 0) {
+      if (cursor + item.skipBytes > readSize)
+        return false;
+      cursor += (size_t)item.skipBytes;
+      continue;
+    }
+
+    size_t itemSize = getSizeForType(item.type);
+    if (cursor + itemSize > readSize)
+      return false;
+    if (!item.isWildcard &&
+        !matchGroupItemValue(memBuffer + cursor, item, floatTolerance))
+      return false;
+    if (!item.isWildcard)
+      matches.push_back({chunkBase + cursor, i});
+    cursor += itemSize;
+  }
+  return !matches.empty();
 }
 
 MemoryCore::MemoryCore() : _pid(0), _task(MACH_PORT_NULL), _resultLimit(0), _floatTolerance(0.001), _groupSearchRange(0x100), _groupAnchorMode(false) {}
@@ -407,19 +513,27 @@ std::vector<GroupItem> MemoryCore::parseGroupString(const std::string &groupStr,
     }
   }
   for (auto &raw : rawItems) {
-    raw.erase(0, raw.find_first_not_of(" \t\n\r"));
-    raw.erase(raw.find_last_not_of(" \t\n\r") + 1);
+    raw = trimGroupToken(raw);
     if (raw.empty())
       continue;
     DataType itemType = getTypeFromSuffix(raw, defaultType);
+    stripGroupBytePrefix(raw, itemType);
     GroupItem item;
     item.type = itemType;
     item.relative = false;
-    item.isRange = hasRangeSeparator(raw);
+    item.isRange = false;
+    item.isWildcard = false;
+    item.skipBytes = 0;
     memset(&item.value, 0, sizeof(item.value));
     memset(&item.minValue, 0, sizeof(item.minValue));
     memset(&item.maxValue, 0, sizeof(item.maxValue));
-    if (item.isRange) {
+    uint64_t skipBytes = 0;
+    if (parseGroupSkipToken(raw, skipBytes)) {
+      item.skipBytes = skipBytes;
+    } else if (isWildcardGroupToken(raw)) {
+      item.isWildcard = true;
+    } else if (hasRangeSeparator(raw)) {
+      item.isRange = true;
       parseRangeString(raw, itemType, &item.minValue, &item.maxValue);
     } else {
       parseValue(raw, itemType, &item.value);
@@ -638,6 +752,7 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
     std::vector<GroupItem> gItemsCopy = gItems;
     uint64_t groupRangeLocal = groupRange;
     bool groupAnchorModeLocal = _groupAnchorMode;  
+    bool groupLayoutModeLocal = groupUsesLayoutMode(gItemsCopy);
     
     bool isStringType = (dType == DataType::String);
     std::string targetString = valueStr;
@@ -740,14 +855,26 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
                 limit = readSize >= targetStringLen ? readSize - targetStringLen : 0;
               } else {
                 size_t scanItemSize = dataSizeLocal;
-                if (searchModeLocal == 2 && !gItemsCopy.empty()) {
+                if (searchModeLocal == 2 && groupLayoutModeLocal) {
+                  limit = readSize > 0 ? readSize - 1 : 0;
+                } else if (searchModeLocal == 2 && !gItemsCopy.empty()) {
                   scanItemSize = getSizeForType(gItemsCopy[0].type);
+                  limit = readSize >= scanItemSize ? readSize - scanItemSize : 0;
+                } else {
+                  limit = readSize >= scanItemSize ? readSize - scanItemSize : 0;
                 }
-                limit = readSize >= scanItemSize ? readSize - scanItemSize : 0;
               }
               
               size_t step;
-              if (searchModeLocal == 2 && !gItemsCopy.empty()) {
+              if (searchModeLocal == 2 && groupLayoutModeLocal) {
+                step = 1;
+                for (const auto &item : gItemsCopy) {
+                  if (item.skipBytes == 0) {
+                    step = item.isWildcard ? 1 : getSizeForType(item.type);
+                    break;
+                  }
+                }
+              } else if (searchModeLocal == 2 && !gItemsCopy.empty()) {
                 step = getSizeForType(gItemsCopy[0].type);
               } else if (dataTypeInt == (int)DataType::String) {
                 step = 1;
@@ -760,7 +887,27 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
                 uint64_t valBits = 0;
                 void *ptr = memBuffer + k;
 
-                if (searchModeLocal == 2) { 
+                if (searchModeLocal == 2 && groupLayoutModeLocal) {
+                  std::vector<std::pair<uint64_t, size_t>> matchedItems;
+                  if (matchGroupLayoutAt(memBuffer, readSize, k, gItemsCopy,
+                                         floatTolerance, matchedItems, curr)) {
+                    for (const auto &matchedItem : matchedItems) {
+                      uint64_t addr = matchedItem.first;
+                      size_t itemIndex = matchedItem.second;
+                      size_t valueSize = getSizeForType(gItemsCopy[itemIndex].type);
+                      RawResult res;
+                      res.address = addr;
+                      res.value = 0;
+                      memcpy(&res.value, memBuffer + (addr - curr),
+                             std::min((size_t)8, valueSize));
+                      res.type = (uint8_t)gItemsCopy[itemIndex].type;
+                      res.padding1 = 0;
+                      res.padding2 = 0;
+                      memset(res.padding, 0, sizeof(res.padding));
+                      localResults.push_back(res);
+                    }
+                  }
+                } else if (searchModeLocal == 2) {
                   const auto &firstItem = gItemsCopy[0];
                   bool firstMatch = matchGroupItemValue(ptr, firstItem, floatTolerance);
 
@@ -905,7 +1052,12 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
       }
       
       size_t groupSize = gItems.size();
-      if (groupSize > 0 && allResults.size() >= groupSize) {
+      if (groupUsesLayoutMode(gItems)) {
+        std::sort(allResults.begin(), allResults.end(),
+                  [](const RawResult &a, const RawResult &b) {
+                    return a.address < b.address;
+                  });
+      } else if (groupSize > 0 && allResults.size() >= groupSize) {
         
         std::vector<std::vector<RawResult>> groups;
         for (size_t i = 0; i + groupSize <= allResults.size(); i += groupSize) {

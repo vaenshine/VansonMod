@@ -157,7 +157,7 @@ static inline NSString* VMGenerateScriptGuideHTML() {
     [html appendFormat:@"<tr><td><code>values</code></td><td>%@</td></tr>", S("param_values_expr")];
     [html appendFormat:@"<tr><td><code>defaultType</code></td><td>%@</td></tr></table>", S("param_default_type")];
     [html appendString:@"<div class=\"code-box\" id=\"code-group\">"];
-    [html appendString:@"vm.searchGroup('100; 200; 300', 'I32');\n\nvm.searchGroup('100 I32; 0.5 F32; 10 I8', 'I32');\n\nvm.searchGroup('100; 200::48', 'I32');\n\nvm.searchGroup('100 I32; 120.5 F32; 0x106b0d I64::48', 'I32');"];
+    [html appendString:@"vm.searchGroup('100; 200; 300', 'I32');\n\nvm.searchGroup('100 I32; 0.5 F32; 10 I8', 'I32');\n\nvm.searchGroup('100; 200::48', 'I32');\n\nvm.searchGroup('1; *; 3::50', 'I32');\n\nvm.searchGroup('4:100 4:* 4:50', 'I32');\n\nvm.search('4:100 w:8 4:50', 'I32');\n\nvm.searchGroup('100 I32; 120.5 F32; 0x106b0d I64::48', 'I32');"];
     [html appendString:@"</div>"];
     [html appendFormat:@"<div class=\"btn-group\"><button class=\"btn btn-copy\" onclick=\"doCopy('code-group')\">%@</button><button class=\"btn btn-insert\" onclick=\"doInsert('code-group')\">%@</button></div>", S("btn_copy"), S("btn_insert")];
     [html appendString:@"</div>"];

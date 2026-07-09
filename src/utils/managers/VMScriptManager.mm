@@ -236,12 +236,17 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
   dispatch_semaphore_t sema = dispatch_semaphore_create(0);
   __block NSUInteger resultCount = 0;
+  uint8_t coreType = [self coreTypeFromStr:typeStr];
+  BOOL useGroupMode =
+      coreType != VMDataTypeString &&
+      ([val containsString:@";"] || [val containsString:@"::"] ||
+       [val containsString:@" "]);
 
   [[VMMemoryEngine shared] clearSession];
   [[VMMemoryEngine shared]
-      scanMemoryWithMode:VMSearchModeExact
+      scanMemoryWithMode:useGroupMode ? VMSearchModeGroup : VMSearchModeExact
                   valStr:val
-            coreDataType:[self coreTypeFromStr:typeStr] 
+            coreDataType:coreType
                fuzzyType:VMFuzzyUnchanged
             isNextSearch:NO
               completion:^(NSUInteger count, NSString *msg) {
@@ -434,6 +439,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
   // 联合搜索: 包含分隔符时使用 Group 模式 (与 VL2.7 一致)
   if ([modeStr isEqualToString:@"eq"] &&
+      coreType != VMDataTypeString &&
       ([val containsString:@";"] || [val containsString:@"::"] || [val containsString:@" "])) {
     // 空格转分号，统一格式给 Group 引擎
     NSString *normalized = val;

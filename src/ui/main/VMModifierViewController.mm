@@ -2806,7 +2806,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     }
 
     VMDataType displayType = item.type;
-    if (displayType < VMDataTypeInt8 || displayType > VMDataTypeDouble) {
+    if (displayType < VMDataTypeInt8 || displayType > VMDataTypeString) {
       if (self.dataTypeSegment.selectedSegmentIndex != UISegmentedControlNoSegment) {
         displayType = (VMDataType)self.dataTypeSegment.selectedSegmentIndex;
       } else {
@@ -2883,7 +2883,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     return;
 
   VMDataType type = item.type;
-  if (type < VMDataTypeInt8 || type > VMDataTypeDouble) {
+  if (type < VMDataTypeInt8 || type > VMDataTypeString) {
     if (self.dataTypeSegment.selectedSegmentIndex != UISegmentedControlNoSegment) {
       type = (VMDataType)self.dataTypeSegment.selectedSegmentIndex;
     } else {
@@ -2966,7 +2966,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                   void (^completion)(BOOL)) {
                           
                           VMDataType type = item.type;
-                          if (type < VMDataTypeInt8 || type > VMDataTypeDouble) {
+                          if (type < VMDataTypeInt8 || type > VMDataTypeString) {
                             if (self.dataTypeSegment.selectedSegmentIndex != UISegmentedControlNoSegment) {
                               type = (VMDataType)self.dataTypeSegment.selectedSegmentIndex;
                             } else {
@@ -2995,7 +2995,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                   void (^completion)(BOOL)) {
                           
                           VMDataType type = item.type;
-                          if (type < VMDataTypeInt8 || type > VMDataTypeDouble) {
+                          if (type < VMDataTypeInt8 || type > VMDataTypeString) {
                             if (self.dataTypeSegment.selectedSegmentIndex != UISegmentedControlNoSegment) {
                               type = (VMDataType)self.dataTypeSegment.selectedSegmentIndex;
                             } else {

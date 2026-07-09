@@ -50,6 +50,7 @@ kern_return_t mach_vm_protect(vm_map_t, mach_vm_address_t, mach_vm_size_t,
                               boolean_t, vm_prot_t);
 }
 #define FILE_BUFFER_SIZE (1024 * 1024)
+static const NSUInteger VM_VISIBLE_STRING_MAX_LEN = 256;
 
 static NSMutableOrderedSet<NSString *> *_starredProcessBIDs = nil;
 static BOOL _starredProcessesLoaded = NO;
@@ -57,6 +58,31 @@ static BOOL _starredProcessesLoaded = NO;
 static NSString *getStarredProcessFilePath(void) {
   NSString *basePath = [VMStoragePathHelper vansonModDirectory];
   return [basePath stringByAppendingPathComponent:@"process.vmps"];
+}
+
+static BOOL VMIsVisibleStringByte(uint8_t b) {
+  return (b >= 0x20 && b <= 0x7E) || b >= 0xC0;
+}
+
+static NSString *VMStringFromVisibleBytes(const uint8_t *bytes, NSUInteger length) {
+  if (!bytes || length == 0)
+    return @"";
+
+  NSUInteger len = 0;
+  while (len < length && len < VM_VISIBLE_STRING_MAX_LEN) {
+    if (bytes[len] == '\0')
+      break;
+    if (!VMIsVisibleStringByte(bytes[len]))
+      break;
+    len++;
+  }
+  if (len == 0)
+    return @"";
+
+  NSString *str = [[NSString alloc] initWithBytes:bytes
+                                           length:len
+                                         encoding:NSUTF8StringEncoding];
+  return str ?: @"";
 }
 
 static void saveStarredProcesses(void) {
@@ -930,22 +956,13 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     return @"(Null)";
   }
   if (type == VMDataTypeString) {
-    uint8_t buf[64];
-    mach_vm_size_t sz = 64;
-    if (mach_vm_read_overwrite(self.targetTask, address, 64,
+    uint8_t buf[VM_VISIBLE_STRING_MAX_LEN] = {0};
+    mach_vm_size_t sz = VM_VISIBLE_STRING_MAX_LEN;
+    if (mach_vm_read_overwrite(self.targetTask, address, VM_VISIBLE_STRING_MAX_LEN,
                                (mach_vm_address_t)buf, &sz) != KERN_SUCCESS) {
       return @"(? ?)";
     }
-    char *strPtr = (char *)buf;
-    size_t len = 0;
-    while (len < sz && strPtr[len] != '\0')
-      len++;
-    if (len == 0)
-      return @"";
-    NSString *str = [[NSString alloc] initWithBytes:buf
-                                             length:len
-                                           encoding:NSUTF8StringEncoding];
-    return str ?: @"(Hex)";
+    return VMStringFromVisibleBytes(buf, (NSUInteger)sz);
   }
   uint8_t buf[8];
   mach_vm_size_t sz = 8;
