@@ -30,7 +30,8 @@
     @"groupRange" : @"0x100",
     @"floatTolerance" : @0.001,
     @"lockInterval" : @0.5,
-    @"preventSleep" : @NO
+    @"preventSleep" : @NO,
+    @"fuzzyRepeatCustomEnabled" : @NO
   }];
 
   [self checkAppReinstallOrUpdate];
@@ -168,6 +169,7 @@
     [def setFloat:0.5f forKey:@"lockInterval"];
     [def setInteger:1 forKey:@"app_theme"];
     [def setObject:@"Auto" forKey:@"user_lang"];
+    [def setBool:NO forKey:@"fuzzyRepeatCustomEnabled"];
 
     [def setBool:YES forKey:@"has_initialized_config_v2"];
     [def setBool:NO

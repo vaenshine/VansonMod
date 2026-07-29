@@ -210,6 +210,9 @@ std::map<std::string, std::string> Lang_KO::getStrings() {
     {"Settings_Fast_Scan_Enabled", "빠름"},
     {"Settings_Fast_Scan_Disabled", "전체"},
     {"Settings_Auto_By_Mode", "자동 (모드별)"},
+    {"Set_Fuzzy_Repeat", "Fuzzy Filter Count"},
+    {"Fuz_Repeat_Default", "Default"},
+    {"Fuz_Repeat_Custom", "Batch"},
 
     {"Theme_Auto", "자동"},
     {"Theme_Light", "라이트"},
@@ -300,6 +303,12 @@ std::map<std::string, std::string> Lang_KO::getStrings() {
     {"Fuz_Hint_Chg", "현재 != 이전"},
     {"Fuz_Hint_Inc_Val", "현재 = 이전 + X"},
     {"Fuz_Hint_Dec_Val", "현재 = 이전 - X"},
+    {"Fuz_Repeat_Title", "Filter Count"},
+    {"Fuz_Repeat_Message", "Run the current fuzzy filter repeatedly"},
+    {"Fuz_Repeat_Custom_Count", "Custom Count"},
+    {"Fuz_Repeat_Custom_Placeholder", "1-100"},
+    {"Fuz_Repeat_Running", "Fuzzy filtering %ld/%ld"},
+    {"Fuz_Repeat_Done", "Fuzzy filters complete %ld/%ld"},
 
     {"Batch_Fav_Success", "%d개 항목 즐겨찾기에 추가됨"},
     {"Batch_Lock_Note", "VansonMod"},

@@ -210,6 +210,9 @@ std::map<std::string, std::string> Lang_TH::getStrings() {
     {"Settings_Fast_Scan_Enabled", "เร็ว"},
     {"Settings_Fast_Scan_Disabled", "เต็ม"},
     {"Settings_Auto_By_Mode", "อัตโนมัติ (ตามโหมด)"},
+    {"Set_Fuzzy_Repeat", "Fuzzy Filter Count"},
+    {"Fuz_Repeat_Default", "Default"},
+    {"Fuz_Repeat_Custom", "Batch"},
 
     {"Theme_Auto", "อัตโนมัติ"},
     {"Theme_Light", "สว่าง"},
@@ -300,6 +303,12 @@ std::map<std::string, std::string> Lang_TH::getStrings() {
     {"Fuz_Hint_Chg", "ปัจจุบัน != ก่อนหน้า"},
     {"Fuz_Hint_Inc_Val", "ปัจจุบัน = ก่อนหน้า + X"},
     {"Fuz_Hint_Dec_Val", "ปัจจุบัน = ก่อนหน้า - X"},
+    {"Fuz_Repeat_Title", "Filter Count"},
+    {"Fuz_Repeat_Message", "Run the current fuzzy filter repeatedly"},
+    {"Fuz_Repeat_Custom_Count", "Custom Count"},
+    {"Fuz_Repeat_Custom_Placeholder", "1-100"},
+    {"Fuz_Repeat_Running", "Fuzzy filtering %ld/%ld"},
+    {"Fuz_Repeat_Done", "Fuzzy filters complete %ld/%ld"},
 
     {"Batch_Fav_Success", "เพิ่ม %d รายการในรายการโปรด"},
     {"Batch_Lock_Note", "VansonMod"},

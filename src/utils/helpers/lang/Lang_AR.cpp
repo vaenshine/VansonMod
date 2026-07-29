@@ -210,6 +210,9 @@ std::map<std::string, std::string> Lang_AR::getStrings() {
     {"Settings_Fast_Scan_Enabled", "سريع"},
     {"Settings_Fast_Scan_Disabled", "كامل"},
     {"Settings_Auto_By_Mode", "تلقائي (حسب الوضع)"},
+    {"Set_Fuzzy_Repeat", "Fuzzy Filter Count"},
+    {"Fuz_Repeat_Default", "Default"},
+    {"Fuz_Repeat_Custom", "Batch"},
 
     {"Theme_Auto", "تلقائي"},
     {"Theme_Light", "فاتح"},
@@ -300,6 +303,12 @@ std::map<std::string, std::string> Lang_AR::getStrings() {
     {"Fuz_Hint_Chg", "الحالي != السابق"},
     {"Fuz_Hint_Inc_Val", "الحالي = السابق + X"},
     {"Fuz_Hint_Dec_Val", "الحالي = السابق - X"},
+    {"Fuz_Repeat_Title", "Filter Count"},
+    {"Fuz_Repeat_Message", "Run the current fuzzy filter repeatedly"},
+    {"Fuz_Repeat_Custom_Count", "Custom Count"},
+    {"Fuz_Repeat_Custom_Placeholder", "1-100"},
+    {"Fuz_Repeat_Running", "Fuzzy filtering %ld/%ld"},
+    {"Fuz_Repeat_Done", "Fuzzy filters complete %ld/%ld"},
 
     {"Batch_Fav_Success", "تمت إضافة %d عنصر إلى المفضلة"},
     {"Batch_Lock_Note", "VansonMod"},

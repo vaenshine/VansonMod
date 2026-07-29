@@ -210,6 +210,9 @@ std::map<std::string, std::string> Lang_JA::getStrings() {
     {"Settings_Fast_Scan_Enabled", "高速"},
     {"Settings_Fast_Scan_Disabled", "フル"},
     {"Settings_Auto_By_Mode", "自動（モード別）"},
+    {"Set_Fuzzy_Repeat", "Fuzzy Filter Count"},
+    {"Fuz_Repeat_Default", "Default"},
+    {"Fuz_Repeat_Custom", "Batch"},
 
     {"Theme_Auto", "自動"},
     {"Theme_Light", "ライト"},
@@ -300,6 +303,12 @@ std::map<std::string, std::string> Lang_JA::getStrings() {
     {"Fuz_Hint_Chg", "現在 != 前回"},
     {"Fuz_Hint_Inc_Val", "現在 = 前回 + X"},
     {"Fuz_Hint_Dec_Val", "現在 = 前回 - X"},
+    {"Fuz_Repeat_Title", "Filter Count"},
+    {"Fuz_Repeat_Message", "Run the current fuzzy filter repeatedly"},
+    {"Fuz_Repeat_Custom_Count", "Custom Count"},
+    {"Fuz_Repeat_Custom_Placeholder", "1-100"},
+    {"Fuz_Repeat_Running", "Fuzzy filtering %ld/%ld"},
+    {"Fuz_Repeat_Done", "Fuzzy filters complete %ld/%ld"},
 
     {"Batch_Fav_Success", "%d 項目をお気に入りに追加"},
     {"Batch_Lock_Note", "VansonMod"},

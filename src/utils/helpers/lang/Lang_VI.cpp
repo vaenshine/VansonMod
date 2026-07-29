@@ -210,6 +210,9 @@ std::map<std::string, std::string> Lang_VI::getStrings() {
     {"Settings_Fast_Scan_Enabled", "Nhanh"},
     {"Settings_Fast_Scan_Disabled", "Đầy đủ"},
     {"Settings_Auto_By_Mode", "Tự động (Theo chế độ)"},
+    {"Set_Fuzzy_Repeat", "Fuzzy Filter Count"},
+    {"Fuz_Repeat_Default", "Default"},
+    {"Fuz_Repeat_Custom", "Batch"},
 
     {"Theme_Auto", "Tự động"},
     {"Theme_Light", "Sáng"},
@@ -300,6 +303,12 @@ std::map<std::string, std::string> Lang_VI::getStrings() {
     {"Fuz_Hint_Chg", "Hiện tại != Trước đó"},
     {"Fuz_Hint_Inc_Val", "Hiện tại = Trước đó + X"},
     {"Fuz_Hint_Dec_Val", "Hiện tại = Trước đó - X"},
+    {"Fuz_Repeat_Title", "Filter Count"},
+    {"Fuz_Repeat_Message", "Run the current fuzzy filter repeatedly"},
+    {"Fuz_Repeat_Custom_Count", "Custom Count"},
+    {"Fuz_Repeat_Custom_Placeholder", "1-100"},
+    {"Fuz_Repeat_Running", "Fuzzy filtering %ld/%ld"},
+    {"Fuz_Repeat_Done", "Fuzzy filters complete %ld/%ld"},
 
     {"Batch_Fav_Success", "Đã thêm %d mục vào yêu thích"},
     {"Batch_Lock_Note", "VansonMod"},

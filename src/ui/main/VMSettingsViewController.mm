@@ -171,6 +171,7 @@
 @property(nonatomic, strong) UITextField *toleranceField;
 @property(nonatomic, strong) UISegmentedControl *preventSleepSegment;  
 @property(nonatomic, strong) UISegmentedControl *groupAnchorSegment;   
+@property(nonatomic, strong) UISegmentedControl *fuzzyRepeatSegment;
 @end
 
 @implementation VMSettingsViewController
@@ -246,6 +247,14 @@
                                action:@selector(preventSleepChanged:)
                      forControlEvents:UIControlEventValueChanged];
 
+  self.fuzzyRepeatSegment = [[UISegmentedControl alloc] initWithItems:@[
+    TR(@"Fuz_Repeat_Default"), TR(@"Fuz_Repeat_Custom")
+  ]];
+  self.fuzzyRepeatSegment.frame = CGRectMake(0, 0, 150, 30);
+  [self.fuzzyRepeatSegment addTarget:self
+                              action:@selector(fuzzyRepeatChanged:)
+                    forControlEvents:UIControlEventValueChanged];
+
   self.startField.text = [def objectForKey:@"startAddr"] ?: @"0x100000000";
   
   self.endField.text = [def objectForKey:@"endAddr"] ?: @"";
@@ -270,6 +279,9 @@
   BOOL prevSleep = [def boolForKey:@"preventSleep"];
   self.preventSleepSegment.selectedSegmentIndex = prevSleep ? 1 : 0;
   [UIApplication sharedApplication].idleTimerDisabled = prevSleep;
+
+  BOOL fuzzyRepeatEnabled = [def boolForKey:@"fuzzyRepeatCustomEnabled"];
+  self.fuzzyRepeatSegment.selectedSegmentIndex = fuzzyRepeatEnabled ? 1 : 0;
 
   id anchorObj = [def objectForKey:@"groupAnchorMode"];
   BOOL anchorMode = (anchorObj == nil) ? NO : [def boolForKey:@"groupAnchorMode"];
@@ -371,6 +383,13 @@
   [def synchronize];
 
   [UIApplication sharedApplication].idleTimerDisabled = isOn;
+}
+
+- (void)fuzzyRepeatChanged:(UISegmentedControl *)sender {
+  BOOL isCustom = (sender.selectedSegmentIndex == 1);
+  NSUserDefaults *def = [NSUserDefaults standardUserDefaults];
+  [def setBool:isCustom forKey:@"fuzzyRepeatCustomEnabled"];
+  [def synchronize];
 }
 
 - (void)groupAnchorChanged:(UISegmentedControl *)sender {
@@ -539,7 +558,7 @@
   if (section == 0)
     return 6; 
   if (section == 1)
-    return 4; 
+    return 5;
   return 7;   
 }
 
@@ -595,12 +614,15 @@
       cell.textLabel.text = TR(@"Set_Theme");
       cell.accessoryView = self.themeSegment;
     } else if (indexPath.row == 2) {
+      cell.textLabel.text = TR(@"Set_Fuzzy_Repeat");
+      cell.accessoryView = self.fuzzyRepeatSegment;
+    } else if (indexPath.row == 3) {
       cell.textLabel.text = TR(@"Set_Lang");
       cell.accessoryView = nil;
       cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
       cell.selectionStyle = UITableViewCellSelectionStyleDefault;
       cell.detailTextLabel.text = [self displayNameForLanguageCode:self.selectedLanguageCode];
-    } else if (indexPath.row == 3) {
+    } else if (indexPath.row == 4) {
       cell.textLabel.text = TR(@"Set_Prev_Sleep");
       cell.accessoryView = self.preventSleepSegment;
     }
@@ -729,7 +751,7 @@
 
   if (indexPath.section == 1) {
     
-    if (indexPath.row == 2) {
+    if (indexPath.row == 3) {
       [self showLanguagePicker];
     }
   } else if (indexPath.section == 2) {

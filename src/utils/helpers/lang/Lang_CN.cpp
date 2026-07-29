@@ -210,6 +210,9 @@ std::map<std::string, std::string> Lang_CN::getStrings() {
     {"Settings_Fast_Scan_Enabled", "快速"},
     {"Settings_Fast_Scan_Disabled", "全量"},
     {"Settings_Auto_By_Mode", "自动（根据模式）"},
+    {"Set_Fuzzy_Repeat", "模糊筛选次数"},
+    {"Fuz_Repeat_Default", "默认"},
+    {"Fuz_Repeat_Custom", "批量"},
 
     {"Theme_Auto", "Auto"},
     {"Theme_Light", "浅色模式"},
@@ -300,6 +303,12 @@ std::map<std::string, std::string> Lang_CN::getStrings() {
     {"Fuz_Hint_Chg", "当前 != 上次"},
     {"Fuz_Hint_Inc_Val", "当前 = 上次 + X"},
     {"Fuz_Hint_Dec_Val", "当前 = 上次 - X"},
+    {"Fuz_Repeat_Title", "选择筛选次数"},
+    {"Fuz_Repeat_Message", "按当前模糊条件连续筛选"},
+    {"Fuz_Repeat_Custom_Count", "自定义次数"},
+    {"Fuz_Repeat_Custom_Placeholder", "1-100"},
+    {"Fuz_Repeat_Running", "模糊筛选 %ld/%ld"},
+    {"Fuz_Repeat_Done", "模糊筛选完成 %ld/%ld"},
 
     {"Batch_Fav_Success", "已批量收藏 %d 项"},
     {"Batch_Lock_Note", "VansonMod"},

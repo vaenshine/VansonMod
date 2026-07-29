@@ -931,11 +931,217 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 - (void)fuzzyRow1Selected:(UISegmentedControl *)sender {
   self.fuzzySegRow2.selectedSegmentIndex = UISegmentedControlNoSegment;
   [self fuzzyTypeChanged];
+  if ([self shouldPromptFuzzyRepeatForRow1]) {
+    VMFilterMode filterMode = [self filterModeForFuzzyRow1Index:sender.selectedSegmentIndex];
+    [self showFuzzyRepeatPickerForFilterMode:filterMode];
+  }
 }
 
 - (void)fuzzyRow2Selected:(UISegmentedControl *)sender {
   self.fuzzySegRow1.selectedSegmentIndex = UISegmentedControlNoSegment;
   [self fuzzyTypeChanged];
+}
+
+- (BOOL)shouldPromptFuzzyRepeatForRow1 {
+  if (![[NSUserDefaults standardUserDefaults] boolForKey:@"fuzzyRepeatCustomEnabled"])
+    return NO;
+  if (self.searchModeSegment.selectedSegmentIndex != VMSearchModeFuzzy)
+    return NO;
+  if (!self.isNextScan || self.isScanning)
+    return NO;
+  if (self.fuzzySegRow1.selectedSegmentIndex == UISegmentedControlNoSegment)
+    return NO;
+  return YES;
+}
+
+- (VMFilterMode)filterModeForFuzzyRow1Index:(NSInteger)idx {
+  if (idx == 0) return VMFilterModeIncreased;
+  if (idx == 1) return VMFilterModeDecreased;
+  if (idx == 2) return VMFilterModeUnchanged;
+  return VMFilterModeChanged;
+}
+
+- (void)showFuzzyRepeatPickerForFilterMode:(VMFilterMode)filterMode {
+  UIAlertController *sheet =
+      [UIAlertController alertControllerWithTitle:TR(@"Fuz_Repeat_Title")
+                                          message:TR(@"Fuz_Repeat_Message")
+                                   preferredStyle:UIAlertControllerStyleActionSheet];
+  NSArray<NSNumber *> *counts = @[ @5, @10, @20, @30 ];
+  for (NSNumber *num in counts) {
+    [sheet addAction:[UIAlertAction
+                         actionWithTitle:[NSString stringWithFormat:@"%@", num]
+                                   style:UIAlertActionStyleDefault
+                                 handler:^(UIAlertAction *a) {
+                                   [self executeFuzzyRepeatWithFilterMode:filterMode
+                                                                    total:num.integerValue];
+                                 }]];
+  }
+  [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Fuz_Repeat_Custom_Count")
+                                            style:UIAlertActionStyleDefault
+                                          handler:^(UIAlertAction *a) {
+                                            [self showFuzzyRepeatCustomInput:filterMode];
+                                          }]];
+  [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
+                                            style:UIAlertActionStyleCancel
+                                          handler:^(UIAlertAction *a) {
+                                            self.fuzzySegRow1.selectedSegmentIndex =
+                                                UISegmentedControlNoSegment;
+                                            [self fuzzyTypeChanged];
+                                          }]];
+  if (sheet.popoverPresentationController) {
+    sheet.popoverPresentationController.sourceView = self.fuzzySegRow1;
+    sheet.popoverPresentationController.sourceRect = self.fuzzySegRow1.bounds;
+  }
+  [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)showFuzzyRepeatCustomInput:(VMFilterMode)filterMode {
+  UIAlertController *alert =
+      [UIAlertController alertControllerWithTitle:TR(@"Fuz_Repeat_Custom_Count")
+                                          message:TR(@"Fuz_Repeat_Message")
+                                   preferredStyle:UIAlertControllerStyleAlert];
+  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+    tf.placeholder = TR(@"Fuz_Repeat_Custom_Placeholder");
+    tf.keyboardType = UIKeyboardTypeNumberPad;
+    tf.text = @"5";
+  }];
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
+                                            style:UIAlertActionStyleCancel
+                                          handler:^(UIAlertAction *a) {
+                                            self.fuzzySegRow1.selectedSegmentIndex =
+                                                UISegmentedControlNoSegment;
+                                            [self fuzzyTypeChanged];
+                                          }]];
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm")
+                                            style:UIAlertActionStyleDefault
+                                          handler:^(UIAlertAction *a) {
+                                            NSInteger total = alert.textFields.firstObject.text.integerValue;
+                                            if (total < 1) total = 1;
+                                            if (total > 100) total = 100;
+                                            [self executeFuzzyRepeatWithFilterMode:filterMode
+                                                                             total:total];
+                                          }]];
+  [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)beginFuzzyRepeatUIWithTotal:(NSInteger)total {
+  self.isScanning = YES;
+  self.view.userInteractionEnabled = NO;
+  [self updateButtonStates];
+  [self.searchBtn setTitle:@"" forState:UIControlStateNormal];
+  self.searchBtn.enabled = NO;
+  if (!self.btnSpinner) {
+    self.btnSpinner = [[UIActivityIndicatorView alloc]
+        initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    self.btnSpinner.color = [UIColor systemBlueColor];
+  }
+  self.btnSpinner.center = CGPointMake(self.searchBtn.bounds.size.width / 2,
+                                       self.searchBtn.bounds.size.height / 2);
+  [self.searchBtn addSubview:self.btnSpinner];
+  [self.btnSpinner startAnimating];
+  self.statusLabel.text = [NSString stringWithFormat:TR(@"Fuz_Repeat_Running"), 0L, (long)total];
+}
+
+- (void)endFuzzyRepeatUIWithCompleted:(NSInteger)completed
+                                total:(NSInteger)total
+                                count:(NSUInteger)count
+                              success:(BOOL)success {
+  [self.btnSpinner stopAnimating];
+  [self.btnSpinner removeFromSuperview];
+  self.searchBtn.enabled = YES;
+  [self.searchBtn setTitle:TR(@"Mod_Search_Next") forState:UIControlStateNormal];
+  self.isScanning = NO;
+  self.view.userInteractionEnabled = YES;
+  self.fuzzySegRow1.selectedSegmentIndex = UISegmentedControlNoSegment;
+  [self updateButtonStates];
+  [self.tableView reloadData];
+  [self updateResultInfo];
+  [self updateEmptyState];
+  self.btnNearby.hidden = NO;
+  self.fuzzySegRow1.hidden = NO;
+  self.fuzzySegRow2.hidden = NO;
+  self.fuzzyHintLabel.hidden = NO;
+  BOOL enableUnchanged = (count <= 20000000);
+  [self.fuzzySegRow1 setEnabled:enableUnchanged forSegmentAtIndex:2];
+  [self fuzzyTypeChanged];
+  [self updateTableHeaderHeight:self.tableView.tableHeaderView];
+
+  NSString *msg = [NSString stringWithFormat:TR(@"Fuz_Repeat_Done"),
+                                             (long)completed, (long)total];
+  self.statusLabel.text = msg;
+  [self showWeakToast:msg];
+  UINotificationFeedbackGenerator *gen = [[UINotificationFeedbackGenerator alloc] init];
+  [gen notificationOccurred:success ? UINotificationFeedbackTypeSuccess
+                                    : UINotificationFeedbackTypeError];
+}
+
+- (void)executeFuzzyRepeatWithFilterMode:(VMFilterMode)filterMode total:(NSInteger)total {
+  if (total < 1) total = 1;
+  [self beginFuzzyRepeatUIWithTotal:total];
+  [self runFuzzyRepeatStepWithFilterMode:filterMode
+                                   total:total
+                               completed:0
+                               lastCount:[VMMemoryEngine shared].resultCount];
+}
+
+- (void)runFuzzyRepeatStepWithFilterMode:(VMFilterMode)filterMode
+                                   total:(NSInteger)total
+                               completed:(NSInteger)completed
+                               lastCount:(NSUInteger)lastCount {
+  if (completed >= total || lastCount == 0) {
+    [self endFuzzyRepeatUIWithCompleted:completed
+                                  total:total
+                                  count:lastCount
+                                success:(completed > 0 && lastCount > 0)];
+    return;
+  }
+
+  NSUInteger currentCount = [VMMemoryEngine shared].resultCount;
+  if (filterMode == VMFilterModeUnchanged && currentCount > 20000000) {
+    [self endFuzzyRepeatUIWithCompleted:completed
+                                  total:total
+                                  count:currentCount
+                                success:NO];
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:TR(@"Alert_Warning")
+                         message:TR(@"Fuzzy_Unchanged_Too_Many")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_OK")
+                                              style:UIAlertActionStyleDefault
+                                            handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+    return;
+  }
+
+  self.statusLabel.text = [NSString stringWithFormat:TR(@"Fuz_Repeat_Running"),
+                                                     (long)(completed + 1),
+                                                     (long)total];
+  VMDataType type = (VMDataType)self.dataTypeSegment.selectedSegmentIndex;
+  [[VMMemoryEngine shared] fastFuzzyFilterWithMode:filterMode
+                                         dataType:type
+                                       completion:^(NSUInteger count, NSString *msg) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      NSInteger nextCompleted = completed + 1;
+      if (count > 0) {
+        NSString *detail = [NSString stringWithFormat:@"%@ x%ld",
+                                                       [self timelineTypeName:type],
+                                                       (long)nextCompleted];
+        [self captureTimelineTitle:[self timelineFilterTitle:filterMode]
+                            detail:detail
+                              type:type];
+      }
+      self.fuzzySearchCount++;
+      if (self.fuzzySearchCount >= 2) {
+        self.isFuzzyLocked = NO;
+        [self.searchModeSegment setEnabled:YES forSegmentAtIndex:0];
+        [self.searchModeSegment setEnabled:YES forSegmentAtIndex:2];
+      }
+      [self runFuzzyRepeatStepWithFilterMode:filterMode
+                                       total:total
+                                   completed:nextCompleted
+                                   lastCount:count];
+    });
+  }];
 }
 
 - (void)setupToolbarAndFilter {

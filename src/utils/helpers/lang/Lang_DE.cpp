@@ -210,6 +210,9 @@ std::map<std::string, std::string> Lang_DE::getStrings() {
     {"Settings_Fast_Scan_Enabled", "Schnell"},
     {"Settings_Fast_Scan_Disabled", "Vollständig"},
     {"Settings_Auto_By_Mode", "Auto (Nach Modus)"},
+    {"Set_Fuzzy_Repeat", "Fuzzy Filter Count"},
+    {"Fuz_Repeat_Default", "Default"},
+    {"Fuz_Repeat_Custom", "Batch"},
 
     {"Theme_Auto", "Auto"},
     {"Theme_Light", "Hell"},
@@ -300,6 +303,12 @@ std::map<std::string, std::string> Lang_DE::getStrings() {
     {"Fuz_Hint_Chg", "Aktuell != Vorher"},
     {"Fuz_Hint_Inc_Val", "Aktuell = Vorher + X"},
     {"Fuz_Hint_Dec_Val", "Aktuell = Vorher - X"},
+    {"Fuz_Repeat_Title", "Filter Count"},
+    {"Fuz_Repeat_Message", "Run the current fuzzy filter repeatedly"},
+    {"Fuz_Repeat_Custom_Count", "Custom Count"},
+    {"Fuz_Repeat_Custom_Placeholder", "1-100"},
+    {"Fuz_Repeat_Running", "Fuzzy filtering %ld/%ld"},
+    {"Fuz_Repeat_Done", "Fuzzy filters complete %ld/%ld"},
 
     {"Batch_Fav_Success", "%d Elemente zu Favoriten hinzugefügt"},
     {"Batch_Lock_Note", "VansonMod"},
