@@ -227,12 +227,11 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   uint64_t start, end;
   [self getSearchRangeStart:&start end:&end fromArg:startArg toArg:endArg];
 
-  NSUserDefaults *def = [NSUserDefaults standardUserDefaults];
-  NSString *oldStart = [def objectForKey:@"startAddr"];
-  NSString *oldEnd = [def objectForKey:@"endAddr"];
-  [def setObject:[NSString stringWithFormat:@"0x%llX", start]
-          forKey:@"startAddr"];
-  [def setObject:[NSString stringWithFormat:@"0x%llX", end] forKey:@"endAddr"];
+  VMMemoryEngine *engine = [VMMemoryEngine shared];
+  uint64_t oldStart = engine.searchRangeStart;
+  uint64_t oldEnd = engine.searchRangeEnd;
+  engine.searchRangeStart = start;
+  engine.searchRangeEnd = end;
 
   dispatch_semaphore_t sema = dispatch_semaphore_create(0);
   __block NSUInteger resultCount = 0;
@@ -242,8 +241,8 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
       ([val containsString:@";"] || [val containsString:@"::"] ||
        [val containsString:@" "]);
 
-  [[VMMemoryEngine shared] clearSession];
-  [[VMMemoryEngine shared]
+  [engine clearSession];
+  [engine
       scanMemoryWithMode:useGroupMode ? VMSearchModeGroup : VMSearchModeExact
                   valStr:val
             coreDataType:coreType
@@ -256,15 +255,8 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
   dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
 
-  if (oldStart)
-    [def setObject:oldStart forKey:@"startAddr"];
-  else
-    [def removeObjectForKey:@"startAddr"]; 
-
-  if (oldEnd)
-    [def setObject:oldEnd forKey:@"endAddr"];
-  else
-    [def removeObjectForKey:@"endAddr"];
+  engine.searchRangeStart = oldStart;
+  engine.searchRangeEnd = oldEnd;
 
   [self _internalLog:[NSString
                          stringWithFormat:TR(@"Script_Log_Search_Found_Fmt"),
@@ -286,12 +278,10 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   
   uint64_t start, end;
   [self getSearchRangeStart:&start end:&end fromArg:startArg toArg:endArg];
-  NSUserDefaults *def = [NSUserDefaults standardUserDefaults];
-  NSString *oldStart = [def objectForKey:@"startAddr"];
-  NSString *oldEnd = [def objectForKey:@"endAddr"];
-  [def setObject:[NSString stringWithFormat:@"0x%llX", start]
-          forKey:@"startAddr"];
-  [def setObject:[NSString stringWithFormat:@"0x%llX", end] forKey:@"endAddr"];
+  uint64_t oldStart = eng.searchRangeStart;
+  uint64_t oldEnd = eng.searchRangeEnd;
+  eng.searchRangeStart = start;
+  eng.searchRangeEnd = end;
   
   dispatch_semaphore_t sema = dispatch_semaphore_create(0);
   __block NSUInteger resultCount = 0;
@@ -306,10 +296,8 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
                  dispatch_semaphore_signal(sema);
                }];
   dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
-  if (oldStart)
-    [def setObject:oldStart forKey:@"startAddr"];
-  if (oldEnd)
-    [def setObject:oldEnd forKey:@"endAddr"];
+  eng.searchRangeStart = oldStart;
+  eng.searchRangeEnd = oldEnd;
   [self _internalLog:
             [NSString stringWithFormat:TR(@"Script_Log_Group_Search_Found_Fmt"),
                                        (unsigned long)resultCount]];

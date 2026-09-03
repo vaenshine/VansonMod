@@ -3336,6 +3336,37 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                                  dataType:type];
 }
 
+- (void)promptRestoreTimelineValuesAtIndex:(NSUInteger)index {
+  VMMemoryEngine *engine = [VMMemoryEngine shared];
+  if (![engine canRestoreMemoryTimelineValuesAtIndex:index])
+    return;
+
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                 dispatch_get_main_queue(), ^{
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:TR(@"Timeline_Restore_Values_Title")
+                         message:TR(@"Timeline_Restore_Values_Msg")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
+                                                style:UIAlertActionStyleCancel
+                                              handler:nil]];
+    [alert addAction:[UIAlertAction
+                         actionWithTitle:TR(@"Timeline_Restore_Values_Action")
+                                   style:UIAlertActionStyleDefault
+                                 handler:^(UIAlertAction *action) {
+                                   NSUInteger restored =
+                                       [engine restoreMemoryTimelineValuesAtIndex:index];
+                                   [self.tableView reloadData];
+                                   [self showToast:restored > 0
+                                       ? [NSString stringWithFormat:
+                                                       TR(@"Timeline_Restore_Values_Success_Fmt"),
+                                                       (unsigned long)restored]
+                                       : TR(@"Timeline_Restore_Failed")];
+                                 }]];
+    [self presentViewController:alert animated:YES completion:nil];
+  });
+}
+
 - (void)showTimelineSheet {
   NSArray<VMMemoryTimelineItem *> *items =
       [[VMMemoryEngine shared] memoryTimelineItems];
@@ -3346,6 +3377,24 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
   NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
   fmt.dateFormat = @"HH:mm:ss";
+
+  VMMemoryEngine *engine = [VMMemoryEngine shared];
+  if ([engine canUndoLastManualWriteBatch]) {
+    NSString *undoTitle =
+        [NSString stringWithFormat:@"%@ (%lu)", TR(@"Undo_Last_Modify"),
+                                   (unsigned long)[engine lastManualWriteBatchCount]];
+    [sheet addAction:[UIAlertAction
+                         actionWithTitle:undoTitle
+                                   style:UIAlertActionStyleDefault
+                                 handler:^(UIAlertAction *a) {
+                                   NSUInteger restored =
+                                       [engine undoLastManualWriteBatch];
+                                   [self.tableView reloadData];
+                                   [self showToast:restored > 0
+                                                       ? TR(@"Undo_Success")
+                                                       : TR(@"Undo_Failed")];
+                                 }]];
+  }
 
   for (NSUInteger i = 0; i < items.count; i++) {
     VMMemoryTimelineItem *item = items[i];
@@ -3380,6 +3429,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                                              TR(@"Timeline_Restored_Fmt"),
                                                              time,
                                                              (unsigned long)item.resultCount]];
+                                     [self promptRestoreTimelineValuesAtIndex:i];
                                    } else {
                                      [self showToast:TR(@"Timeline_Restore_Failed")];
                                    }

@@ -11,6 +11,7 @@
 #define PAGE_COUNT 100
 #define MAX_BUFFER_ROWS 1000
 #define PRELOAD_THRESHOLD 400
+#define STR_PRELOAD_THRESHOLD 120
 #define NUMERIC_REFRESH_INTERVAL 0.5
 #define STRING_REFRESH_INTERVAL 1.0
 
@@ -181,6 +182,9 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     self.tableView.rowHeight = ROW_HEIGHT;
+    self.tableView.decelerationRate = self.isStrMode
+        ? UIScrollViewDecelerationRateFast
+        : UIScrollViewDecelerationRateNormal;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone; 
     
     if (@available(iOS 15.0, *)) {
@@ -219,6 +223,11 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
       self.type = typeMap[idx];
     }
     self.isStrMode = (self.type == VMDataTypeString);
+    if (self.tableView) {
+      self.tableView.decelerationRate = self.isStrMode
+          ? UIScrollViewDecelerationRateFast
+          : UIScrollViewDecelerationRateNormal;
+    }
     
     switch (self.type) {
       case VMDataTypeInt8: self.typeSize = 1; break;
@@ -533,6 +542,17 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 
 - (void)showNavMenu {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:TR(@"Pop_Options") message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    VMMemoryEngine *engine = [VMMemoryEngine shared];
+    if ([engine canUndoLastManualWriteBatch]) {
+        NSString *title = [NSString stringWithFormat:@"%@ (%lu)",
+                                                     TR(@"Undo_Last_Modify"),
+                                                     (unsigned long)[engine lastManualWriteBatchCount]];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            NSUInteger restored = [engine undoLastManualWriteBatch];
+            [self refreshCurrentData];
+            [self showToast:restored > 0 ? TR(@"Undo_Success") : TR(@"Undo_Failed")];
+        }]];
+    }
     [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Mod_Results_Refreshed") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self refreshCurrentData];
     }]];
@@ -619,9 +639,11 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     CGFloat contentH = scrollView.contentSize.height;
     
     if (self.isStrMode) {
-        if (y < PRELOAD_THRESHOLD) {
+        if (!scrollView.isDragging) return;
+        CGFloat velocityY = [scrollView.panGestureRecognizer velocityInView:scrollView].y;
+        if (y < STR_PRELOAD_THRESHOLD && velocityY > 0) {
             [self loadMoreStrData:NO];
-        } else if (y > contentH - h - PRELOAD_THRESHOLD) {
+        } else if (y > contentH - h - STR_PRELOAD_THRESHOLD && velocityY < 0) {
             [self loadMoreStrData:YES];
         }
         return;
@@ -633,6 +655,21 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     else if (y > contentH - h - PRELOAD_THRESHOLD) {
         [self loadMoreData:YES];
     }
+}
+
+- (void)scrollViewWillEndDragging:(UIScrollView *)scrollView
+                     withVelocity:(CGPoint)velocity
+              targetContentOffset:(inout CGPoint *)targetContentOffset {
+    if (!self.isStrMode || !targetContentOffset) return;
+
+    CGFloat currentY = scrollView.contentOffset.y;
+    CGFloat maxTravel = MAX(ROW_HEIGHT * 3.0, scrollView.bounds.size.height * 0.75);
+    CGFloat minY = -scrollView.adjustedContentInset.top;
+    CGFloat maxY = MAX(minY, scrollView.contentSize.height - scrollView.bounds.size.height +
+                             scrollView.adjustedContentInset.bottom);
+    CGFloat limitedY = MIN(MAX(targetContentOffset->y, currentY - maxTravel),
+                           currentY + maxTravel);
+    targetContentOffset->y = MIN(MAX(limitedY, minY), maxY);
 }
 
 - (void)loadMoreData:(BOOL)next {
@@ -1136,14 +1173,18 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 
 - (void)executeBatchModifyWithInput:(NSString *)input mode:(NSInteger)mode {
     NSArray<NSNumber *> *sortedAddrs = [self sortedSelectedBrowserAddresses];
-    NSUInteger successCount = 0;
+    NSMutableArray<NSDictionary *> *writes = [NSMutableArray arrayWithCapacity:sortedAddrs.count];
 
     for (NSUInteger i = 0; i < sortedAddrs.count; i++) {
         NSNumber *addrNum = sortedAddrs[i];
         NSString *writeValue = [self batchBrowserWriteValueFromInput:input offset:i mode:mode];
-        [[VMMemoryEngine shared] writeAddress:[addrNum unsignedLongLongValue] value:writeValue type:self.type];
-        successCount++;
+        [writes addObject:@{
+            @"address": addrNum,
+            @"type": @(self.type),
+            @"value": writeValue
+        }];
     }
+    NSUInteger successCount = [[VMMemoryEngine shared] performManualBatchWrites:writes];
 
     NSMutableArray<NSIndexPath *> *visibleUpdates = [NSMutableArray array];
     for (NSIndexPath *ip in [self.tableView indexPathsForVisibleRows]) {

@@ -321,11 +321,21 @@
 
 - (void)textFieldDidEndEditing:(UITextField *)textField {
   NSUserDefaults *def = [NSUserDefaults standardUserDefaults];
-  if (textField == self.startField)
+  if (textField == self.startField) {
     [def setObject:textField.text forKey:@"startAddr"];
-  else if (textField == self.endField)
+    NSString *text = [textField.text stringByTrimmingCharactersInSet:
+                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    [VMMemoryEngine shared].searchRangeStart =
+        strtoull([text UTF8String], NULL,
+                 ([text hasPrefix:@"0x"] || [text hasPrefix:@"0X"]) ? 0 : 16);
+  } else if (textField == self.endField) {
     [def setObject:textField.text forKey:@"endAddr"];
-  else if (textField == self.groupRangeField) {
+    NSString *text = [textField.text stringByTrimmingCharactersInSet:
+                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    [VMMemoryEngine shared].searchRangeEnd =
+        strtoull([text UTF8String], NULL,
+                 ([text hasPrefix:@"0x"] || [text hasPrefix:@"0X"]) ? 0 : 16);
+  } else if (textField == self.groupRangeField) {
     [def setObject:textField.text forKey:@"groupRange"];
     if ([textField.text hasPrefix:@"0x"])
       [VMMemoryEngine shared].groupSearchRange =
@@ -1037,6 +1047,8 @@
   [VMMemoryEngine shared].resultLimit = 100;
   [VMMemoryEngine shared].floatTolerance = 0.001;
   [VMMemoryEngine shared].groupAnchorMode = NO;  
+  [VMMemoryEngine shared].searchRangeStart = 0x100000000ULL;
+  [VMMemoryEngine shared].searchRangeEnd = 0x300000000ULL;
 
   self.startField.text = @"0x100000000";
   

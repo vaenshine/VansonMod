@@ -52,6 +52,21 @@ kern_return_t mach_vm_protect(vm_map_t, mach_vm_address_t, mach_vm_size_t,
 #define FILE_BUFFER_SIZE (1024 * 1024)
 static const NSUInteger VM_VISIBLE_STRING_MAX_LEN = 256;
 
+static uint64_t VMParseAddressSetting(NSString *text, uint64_t fallback) {
+  NSString *trimmed =
+      [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (trimmed.length == 0)
+    return fallback;
+
+  const char *cstr = [trimmed UTF8String];
+  char *end = nullptr;
+  int base = ([trimmed hasPrefix:@"0x"] || [trimmed hasPrefix:@"0X"]) ? 0 : 16;
+  unsigned long long parsed = strtoull(cstr, &end, base);
+  if (end == cstr || *end != '\0')
+    return fallback;
+  return (uint64_t)parsed;
+}
+
 static NSMutableOrderedSet<NSString *> *_starredProcessBIDs = nil;
 static BOOL _starredProcessesLoaded = NO;
 
@@ -149,6 +164,8 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
 @end
 @implementation VMMemoryWriteUndoItem
 @end
+@implementation VMMemoryWriteUndoBatch
+@end
 @interface VMMemoryEngine () {
   std::unique_ptr<VMCore::MemoryCore> _core;
   
@@ -157,6 +174,8 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
 @property(nonatomic, strong) NSMutableArray<VMRegionBlock *> *memorySnapshot;
 @property(nonatomic, strong) NSMutableArray<VMMemoryTimelineItem *> *memoryTimeline;
 @property(nonatomic, strong) NSMutableArray<VMMemoryWriteUndoItem *> *manualWriteUndoStack;
+@property(nonatomic, strong) NSMutableArray<VMMemoryWriteUndoBatch *> *manualWriteUndoBatches;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, VMMemoryWriteUndoBatch *> *valueSnapshots;
 @end
 @implementation VMMemoryEngine
 + (instancetype)shared {
@@ -239,13 +258,12 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     _rvaPatches = [NSMutableArray array];
     _memoryTimeline = [NSMutableArray array];
     _manualWriteUndoStack = [NSMutableArray array];
+    _manualWriteUndoBatches = [NSMutableArray array];
+    _valueSnapshots = [NSMutableDictionary dictionary];
 
     [self switchContext:@"mod"];
     [self loadSettings];
     [self loadRVAPatches];
-
-    self.searchRangeStart = 0;
-    self.searchRangeEnd = 0;
   }
   return self;
 }
@@ -258,6 +276,15 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
 - (void)loadSettings {
   
   NSUserDefaults *def = [NSUserDefaults standardUserDefaults];
+
+  self.searchRangeStart =
+      VMParseAddressSetting([def objectForKey:@"startAddr"], 0x100000000ULL);
+  self.searchRangeEnd =
+      VMParseAddressSetting([def objectForKey:@"endAddr"], 0x300000000ULL);
+  if (self.searchRangeEnd <= self.searchRangeStart) {
+    self.searchRangeStart = 0x100000000ULL;
+    self.searchRangeEnd = 0x300000000ULL;
+  }
   
   NSString *grpStr = [def objectForKey:@"groupRange"];
   if (grpStr && grpStr.length > 0) {
@@ -342,6 +369,7 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     [self clearAllSnapshots];
     [self clearMemoryTimeline];
     [self clearManualWriteUndo];
+    [self clearAllValueSnapshots];
     [self.lockedItems removeAllObjects];
 
     [self.rvaPatches removeAllObjects];
@@ -542,6 +570,24 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   return ok;
 }
 
+- (BOOL)canRestoreMemoryTimelineValuesAtIndex:(NSUInteger)index {
+  if (index >= self.memoryTimeline.count)
+    return NO;
+  NSUInteger count = self.memoryTimeline[index].resultCount;
+  return count > 0 && count <= 10000 && self.targetTask != MACH_PORT_NULL;
+}
+
+- (NSUInteger)restoreMemoryTimelineValuesAtIndex:(NSUInteger)index {
+  if (![self canRestoreMemoryTimelineValuesAtIndex:index])
+    return 0;
+  VMMemoryTimelineItem *item = self.memoryTimeline[index];
+  if (item.filePath.length == 0 ||
+      ![[NSFileManager defaultManager] fileExistsAtPath:item.filePath])
+    return 0;
+  return _core->restoreValuesFromFile([item.filePath UTF8String],
+                                      item.resultCount, 10000);
+}
+
 - (void)removeMemoryTimelineAtIndex:(NSUInteger)index {
   if (index >= self.memoryTimeline.count)
     return;
@@ -613,6 +659,215 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
 
 - (void)clearManualWriteUndo {
   [self.manualWriteUndoStack removeAllObjects];
+  [self.manualWriteUndoBatches removeAllObjects];
+}
+
+- (NSUInteger)writeSizeForType:(VMDataType)type
+                      oldValue:(NSString *)oldValue
+                      newValue:(NSString *)newValue {
+  switch (type) {
+    case VMDataTypeInt8:
+    case VMDataTypeUInt8:
+      return 1;
+    case VMDataTypeInt16:
+    case VMDataTypeUInt16:
+      return 2;
+    case VMDataTypeInt64:
+    case VMDataTypeUInt64:
+    case VMDataTypeDouble:
+      return 8;
+    case VMDataTypeString: {
+      NSUInteger oldLen = [oldValue lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+      NSUInteger newLen = [newValue lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+      return MAX((NSUInteger)1, MAX(oldLen, newLen) + 1);
+    }
+    case VMDataTypeInt32:
+    case VMDataTypeUInt32:
+    case VMDataTypeFloat:
+    default:
+      return 4;
+  }
+}
+
+- (NSUInteger)performManualBatchWrites:(NSArray<NSDictionary *> *)writes {
+  if (writes.count == 0 || self.targetTask == MACH_PORT_NULL)
+    return 0;
+
+  VMMemoryWriteUndoBatch *batch = [VMMemoryWriteUndoBatch new];
+  batch.pid = self.targetPid;
+  batch.bundleID = self.currentBundleID ?: @"";
+  batch.items = [NSMutableArray array];
+  batch.date = [NSDate date];
+
+  NSMutableSet<NSString *> *captured = [NSMutableSet set];
+  NSUInteger successCount = 0;
+  for (NSDictionary *write in writes) {
+    uint64_t address = [write[@"address"] unsignedLongLongValue];
+    VMDataType type = (VMDataType)[write[@"type"] unsignedIntegerValue];
+    NSString *newValue = write[@"value"];
+    if (address == 0 || newValue.length == 0)
+      continue;
+
+    NSString *key = [NSString stringWithFormat:@"%llX-%lu", address,
+                                               (unsigned long)type];
+    NSString *oldValue = [self readAddress:address type:type] ?: @"";
+    NSUInteger size = [self writeSizeForType:type
+                                    oldValue:oldValue
+                                    newValue:newValue];
+    NSData *oldData = [self readRawMemory:address length:size];
+    if (!oldData)
+      continue;
+
+    if ([self writeAddress:address value:newValue type:type]) {
+      successCount++;
+      if (![captured containsObject:key]) {
+        VMMemoryWriteUndoItem *item = [VMMemoryWriteUndoItem new];
+        item.pid = self.targetPid;
+        item.bundleID = self.currentBundleID ?: @"";
+        item.address = address;
+        item.type = type;
+        item.oldValue = oldValue;
+        item.writtenValue = newValue;
+        item.oldData = oldData;
+        item.date = batch.date;
+        [batch.items addObject:item];
+        [captured addObject:key];
+      }
+    }
+  }
+
+  if (batch.items.count > 0) {
+    [self.manualWriteUndoBatches insertObject:batch atIndex:0];
+    const NSUInteger maxBatches = 10;
+    while (self.manualWriteUndoBatches.count > maxBatches)
+      [self.manualWriteUndoBatches removeLastObject];
+  }
+  return successCount;
+}
+
+- (BOOL)canUndoLastManualWriteBatch {
+  VMMemoryWriteUndoBatch *batch = self.manualWriteUndoBatches.firstObject;
+  if (!batch)
+    return NO;
+  return batch.pid == self.targetPid &&
+         [batch.bundleID isEqualToString:(self.currentBundleID ?: @"")];
+}
+
+- (NSUInteger)lastManualWriteBatchCount {
+  return [self canUndoLastManualWriteBatch]
+             ? self.manualWriteUndoBatches.firstObject.items.count
+             : 0;
+}
+
+- (NSUInteger)undoLastManualWriteBatch {
+  if (![self canUndoLastManualWriteBatch])
+    return 0;
+
+  VMMemoryWriteUndoBatch *batch = self.manualWriteUndoBatches.firstObject;
+  NSMutableArray<VMMemoryWriteUndoItem *> *failed = [NSMutableArray array];
+  NSUInteger restored = 0;
+  for (VMMemoryWriteUndoItem *item in [batch.items reverseObjectEnumerator]) {
+    if ([self writeRawData:item.oldData toAddress:item.address]) {
+      restored++;
+      for (NSMutableDictionary *lockItem in self.lockedItems) {
+        if ([lockItem[@"addr"] unsignedLongLongValue] == item.address) {
+          lockItem[@"val"] = item.oldValue ?: @"";
+          break;
+        }
+      }
+    } else {
+      [failed addObject:item];
+    }
+  }
+
+  if (failed.count == 0)
+    [self.manualWriteUndoBatches removeObjectAtIndex:0];
+  else
+    batch.items = failed;
+  return restored;
+}
+
+- (NSUInteger)captureValueSnapshotForKey:(NSString *)key
+                                   items:(NSArray<NSDictionary *> *)items {
+  if (key.length == 0 || items.count == 0 || self.targetTask == MACH_PORT_NULL)
+    return 0;
+
+  VMMemoryWriteUndoBatch *snapshot = [VMMemoryWriteUndoBatch new];
+  snapshot.pid = self.targetPid;
+  snapshot.bundleID = self.currentBundleID ?: @"";
+  snapshot.items = [NSMutableArray array];
+  snapshot.date = [NSDate date];
+
+  NSMutableSet<NSString *> *captured = [NSMutableSet set];
+  for (NSDictionary *source in items) {
+    uint64_t address = [source[@"address"] unsignedLongLongValue];
+    VMDataType type = (VMDataType)[source[@"type"] unsignedIntegerValue];
+    NSString *identity = [NSString stringWithFormat:@"%llX-%lu", address,
+                                                    (unsigned long)type];
+    if (address == 0 || [captured containsObject:identity])
+      continue;
+
+    NSString *value = [self readAddress:address type:type] ?: @"";
+    NSUInteger size = [self writeSizeForType:type oldValue:value newValue:value];
+    NSData *data = [self readRawMemory:address length:size];
+    if (!data)
+      continue;
+
+    VMMemoryWriteUndoItem *item = [VMMemoryWriteUndoItem new];
+    item.pid = self.targetPid;
+    item.bundleID = self.currentBundleID ?: @"";
+    item.address = address;
+    item.type = type;
+    item.oldValue = value;
+    item.oldData = data;
+    item.date = snapshot.date;
+    [snapshot.items addObject:item];
+    [captured addObject:identity];
+  }
+
+  if (snapshot.items.count > 0)
+    self.valueSnapshots[key] = snapshot;
+  return snapshot.items.count;
+}
+
+- (BOOL)hasValueSnapshotForKey:(NSString *)key {
+  VMMemoryWriteUndoBatch *snapshot = self.valueSnapshots[key];
+  return snapshot.items.count > 0 && snapshot.pid == self.targetPid &&
+         [snapshot.bundleID isEqualToString:(self.currentBundleID ?: @"")];
+}
+
+- (NSUInteger)valueSnapshotCountForKey:(NSString *)key {
+  return [self hasValueSnapshotForKey:key] ? self.valueSnapshots[key].items.count : 0;
+}
+
+- (NSUInteger)restoreValueSnapshotForKey:(NSString *)key {
+  if (![self hasValueSnapshotForKey:key])
+    return 0;
+
+  VMMemoryWriteUndoBatch *snapshot = self.valueSnapshots[key];
+  NSUInteger restored = 0;
+  for (VMMemoryWriteUndoItem *item in snapshot.items) {
+    if (![self writeRawData:item.oldData toAddress:item.address])
+      continue;
+    restored++;
+    for (NSMutableDictionary *entry in self.lockedItems) {
+      if ([entry[@"addr"] unsignedLongLongValue] == item.address) {
+        entry[@"val"] = item.oldValue ?: @"";
+        break;
+      }
+    }
+    for (NSMutableDictionary *entry in self.favoriteItems) {
+      if ([entry[@"addr"] unsignedLongLongValue] == item.address) {
+        entry[@"val"] = item.oldValue ?: @"";
+        break;
+      }
+    }
+  }
+  return restored;
+}
+
+- (void)clearAllValueSnapshots {
+  [self.valueSnapshots removeAllObjects];
 }
 
 #pragma mark - Session Snapshot Stack
@@ -1009,7 +1264,7 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   return _core->writeMemory(address, data.bytes, data.length);
 }
 
-- (void)writeAddress:(uint64_t)address
+- (BOOL)writeAddress:(uint64_t)address
                value:(NSString *)value
                 type:(VMDataType)type {
   for (NSMutableDictionary *item in self.lockedItems) {
@@ -1019,7 +1274,7 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     }
   }
   if (self.targetTask == MACH_PORT_NULL)
-    return;
+    return NO;
 
   NSMutableData *data = nil;
   if (type == VMDataTypeString) {
@@ -1082,8 +1337,7 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
         break;
     }
   }
-  if (data)
-    [self writeRawData:data toAddress:address];
+  return data ? [self writeRawData:data toAddress:address] : NO;
 }
 
 - (NSData *)readRawMemory:(uint64_t)address length:(size_t)len {
@@ -1111,6 +1365,7 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     
     double dValue = [input doubleValue];
     long long iValue = [input longLongValue];
+    NSMutableArray<NSDictionary *> *writes = [NSMutableArray array];
     for (NSInteger i = 0; i < items.count; i++) {
       if (limit > 0 && i >= limit)
         break;
@@ -1127,12 +1382,34 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
                                                     type:actualType
                                                   inputD:dValue
                                                   inputI:iValue];
-      [self writeAddress:item.address value:writeStr type:actualType];
+      [writes addObject:@{
+        @"address" : @(item.address),
+        @"type" : @(actualType),
+        @"value" : writeStr
+      }];
     }
+    [self performManualBatchWrites:writes];
   } else {
-    
-    _core->batchModify([input UTF8String], (int)limit, convertToCoreDataType(type),
-                       mode);
+    NSUInteger count = self.resultCount;
+    if (limit > 0)
+      count = MIN(count, (NSUInteger)limit);
+    if (count <= 10000) {
+      NSMutableArray<VMScanResultItem *> *allItems =
+          [NSMutableArray arrayWithCapacity:count];
+      for (NSUInteger i = 0; i < count; i++) {
+        VMScanResultItem *item = [self getResultItemAtIndex:i dataType:type];
+        if (item)
+          [allItems addObject:item];
+      }
+      [self batchModifyValues:input
+                        limit:0
+                         type:type
+                         mode:mode
+                        items:allItems];
+    } else {
+      _core->batchModify([input UTF8String], (int)limit,
+                         convertToCoreDataType(type), mode);
+    }
   }
 }
 
@@ -3062,7 +3339,7 @@ static void forwardSearchProgressBridge(VMCore::MemoryCore::SearchProgress progr
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
     NSDate *startTime = [NSDate date];
     
-    _core->fastFuzzyInit();
+    _core->fastFuzzyInit(self.searchRangeStart, self.searchRangeEnd);
     
     NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:startTime];
     size_t addressCount = _core->getFastFuzzyAddressCount();

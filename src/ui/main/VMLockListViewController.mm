@@ -1287,6 +1287,25 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
                              action:@selector(addFavoriteManual)];
     [rightBtns addObject:add];
   }
+
+  if ((_currentTab == 0 || _currentTab == 1) &&
+      [[VMMemoryEngine shared] canUndoLastManualWriteBatch]) {
+    UIBarButtonItem *undo = [[UIBarButtonItem alloc]
+        initWithImage:[UIImage systemImageNamed:@"arrow.uturn.backward"]
+                style:UIBarButtonItemStylePlain
+               target:self
+               action:@selector(undoLastManualBatch)];
+    [rightBtns addObject:undo];
+  }
+
+  if (_currentTab == 0 || _currentTab == 1) {
+    UIBarButtonItem *snapshot = [[UIBarButtonItem alloc]
+        initWithImage:[UIImage systemImageNamed:@"camera"]
+                style:UIBarButtonItemStylePlain
+               target:self
+               action:@selector(showValueSnapshotMenu)];
+    [rightBtns addObject:snapshot];
+  }
   
   else {
     
@@ -4213,7 +4232,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   long long startInt = [inputVal longLongValue];
 
   NSArray *dataSrc = [self currentDisplayData];
-  int successCount = 0;
+  NSMutableArray<NSDictionary *> *writes = [NSMutableArray array];
 
   NSArray *sortedPaths = [paths sortedArrayUsingComparator:^NSComparisonResult(NSIndexPath *a, NSIndexPath *b) {
     return [a compare:b];
@@ -4237,12 +4256,13 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
         for (NSDictionary *res in sig.runtimeResults) {
           uint64_t addr = [res[@"addr"] unsignedLongLongValue];
           if (addr > 0) {
-            [[VMMemoryEngine shared] writeAddress:addr
-                                            value:writeStr
-                                             type:type];
+            [writes addObject:@{
+              @"address" : @(addr),
+              @"type" : @(type),
+              @"value" : writeStr
+            }];
           }
         }
-        successCount++;
       }
       continue; 
     }
@@ -4291,12 +4311,16 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     }
 
     if (targetAddr > 0) {
-      [[VMMemoryEngine shared] writeAddress:targetAddr
-                                      value:writeStr
-                                       type:type];
-      successCount++;
+      [writes addObject:@{
+        @"address" : @(targetAddr),
+        @"type" : @(type),
+        @"value" : writeStr
+      }];
     }
   }
+
+  NSUInteger successCount =
+      [[VMMemoryEngine shared] performManualBatchWrites:writes];
 
   NSString *bid = [[VMMemoryEngine shared] currentBundleID];
   if (bid) {
@@ -4309,8 +4333,77 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
   [self exitBatchMode];
   [self.tableView reloadData];
-  [self showToast:[NSString stringWithFormat:@"%@ %d", TR(@"Msg_Mod_Success"),
-                                             successCount]];
+  [self showToast:[NSString stringWithFormat:@"%@ %lu", TR(@"Msg_Mod_Success"),
+                                             (unsigned long)successCount]];
+}
+
+- (void)undoLastManualBatch {
+  NSUInteger restored = [[VMMemoryEngine shared] undoLastManualWriteBatch];
+  [self.tableView reloadData];
+  [self updateNavBar];
+  [self showToast:restored > 0 ? TR(@"Undo_Success") : TR(@"Undo_Failed")];
+}
+
+- (NSString *)currentValueSnapshotKey {
+  return self.currentTab == 0 ? @"locked-addresses" : @"favorites";
+}
+
+- (void)showValueSnapshotMenu {
+  NSString *key = [self currentValueSnapshotKey];
+  VMMemoryEngine *engine = [VMMemoryEngine shared];
+  UIAlertController *sheet = [UIAlertController
+      alertControllerWithTitle:TR(@"Ptr_Snapshot_Take")
+                       message:nil
+                preferredStyle:UIAlertControllerStyleActionSheet];
+
+  [sheet addAction:[UIAlertAction
+                       actionWithTitle:TR(@"Ptr_Snapshot_Take")
+                                 style:UIAlertActionStyleDefault
+                               handler:^(UIAlertAction *a) {
+                                 NSMutableArray<NSDictionary *> *items =
+                                     [NSMutableArray array];
+                                 for (NSDictionary *entry in [self currentDisplayData]) {
+                                   [items addObject:@{
+                                     @"address" : entry[@"addr"] ?: @0,
+                                     @"type" : entry[@"type"] ?: @(VMDataTypeInt32)
+                                   }];
+                                 }
+                                 NSUInteger count =
+                                     [engine captureValueSnapshotForKey:key items:items];
+                                 NSString *message = count > 0
+                                     ? [NSString stringWithFormat:@"%@ (%lu)",
+                                                                  TR(@"Ptr_Snapshot_Taken"),
+                                                                  (unsigned long)count]
+                                     : TR(@"Msg_Snapshot_Failed");
+                                 [self showToast:message];
+                                 [self updateNavBar];
+                               }]];
+
+  if ([engine hasValueSnapshotForKey:key]) {
+    NSString *restoreTitle =
+        [NSString stringWithFormat:@"%@ (%lu)", TR(@"Btn_Restore"),
+                                   (unsigned long)[engine valueSnapshotCountForKey:key]];
+    [sheet addAction:[UIAlertAction
+                         actionWithTitle:restoreTitle
+                                   style:UIAlertActionStyleDefault
+                                 handler:^(UIAlertAction *a) {
+                                   NSUInteger restored =
+                                       [engine restoreValueSnapshotForKey:key];
+                                   [self.tableView reloadData];
+                                   [self showToast:restored > 0
+                                                       ? TR(@"Undo_Success")
+                                                       : TR(@"Timeline_Restore_Failed")];
+                                 }]];
+  }
+
+  [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
+                                            style:UIAlertActionStyleCancel
+                                          handler:nil]];
+  if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
+    sheet.popoverPresentationController.barButtonItem =
+        self.navigationItem.rightBarButtonItems.lastObject;
+  }
+  [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)exportSelectedAsBackup:(NSArray *)selectedPaths {

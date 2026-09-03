@@ -691,8 +691,11 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
       break;
 
     if ((info.protection & VM_PROT_READ) && (info.protection & VM_PROT_WRITE)) {
-      if (size <= 1024 * 1024 * 1024) { 
-        regions.push_back({address, size});
+      if (size <= 1024 * 1024 * 1024) {
+        uint64_t regionStart = std::max<uint64_t>(address, start);
+        uint64_t regionEnd = std::min<uint64_t>(address + size, endAddress);
+        if (regionEnd > regionStart)
+          regions.push_back({regionStart, regionEnd - regionStart});
       }
     }
     address += size;
@@ -1513,6 +1516,33 @@ bool MemoryCore::restoreResultsFromFile(const std::string &filePath,
 
   _resultCount = resultCount;
   return true;
+}
+
+size_t MemoryCore::restoreValuesFromFile(const std::string &filePath,
+                                         size_t resultCount,
+                                         size_t maxCount) {
+  if (_task == MACH_PORT_NULL || filePath.empty() || resultCount == 0 ||
+      resultCount > maxCount)
+    return 0;
+
+  FILE *file = fopen(filePath.c_str(), "rb");
+  if (!file)
+    return 0;
+
+  size_t restored = 0;
+  RawResult raw;
+  for (size_t index = 0;
+       index < resultCount && fread(&raw, sizeof(RawResult), 1, file) == 1;
+       index++) {
+    DataType type = (DataType)raw.type;
+    if (type == DataType::String || raw.type > (uint8_t)DataType::String)
+      continue;
+    size_t size = getSizeForType(type);
+    if (writeMemory(raw.address, &raw.value, size))
+      restored++;
+  }
+  fclose(file);
+  return restored;
 }
 
 std::vector<ScanResult>
@@ -2956,7 +2986,7 @@ search_done:
   return results;
 }
 
-void MemoryCore::fastFuzzyInit() {
+void MemoryCore::fastFuzzyInit(uint64_t start, uint64_t end) {
 
   clearFastFuzzySnapshot();
 
@@ -2971,8 +3001,9 @@ void MemoryCore::fastFuzzyInit() {
   if (!snapshotFile) return;
 
   _fastFuzzyAddressCount = 0;
-  const uint64_t endAddress = 0x800000000;
-  mach_vm_address_t address = 0x100000000;
+  const uint64_t startAddress = start > 0 ? start : 0x100000000ULL;
+  const uint64_t endAddress = end > startAddress ? end : 0x800000000ULL;
+  mach_vm_address_t address = startAddress;
   uint64_t totalCaptured = 0;
   const uint64_t maxTotalSize = 8ULL * 1024 * 1024 * 1024;
   const size_t chunkBufferSize = 32ULL * 1024 * 1024;
@@ -2989,7 +3020,7 @@ void MemoryCore::fastFuzzyInit() {
     if (kr != KERN_SUCCESS) break;
 
     if ((info.protection & VM_PROT_READ) && (info.protection & VM_PROT_WRITE)) {
-      uint64_t regionStart = address;
+      uint64_t regionStart = std::max<uint64_t>(address, startAddress);
       uint64_t regionEnd = std::min<uint64_t>(address + size, endAddress);
       for (uint64_t cursor = regionStart;
            cursor < regionEnd && totalCaptured < maxTotalSize;) {
@@ -3200,7 +3231,7 @@ std::vector<ScanResult> MemoryCore::fastFuzzyFilter(DataType type, int filterMod
     
   } else {
     
-    const uint64_t endAddress = 0x800000000;
+    const uint64_t endAddress = end > start ? end : 0x800000000ULL;
     uint64_t startAddr = start;
     uint64_t endAddr = endAddress;
 

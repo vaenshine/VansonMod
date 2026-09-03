@@ -100,6 +100,13 @@ typedef enum : NSUInteger {
 @property(nonatomic, strong) NSDate *date;
 @end
 
+@interface VMMemoryWriteUndoBatch : NSObject
+@property(nonatomic, assign) pid_t pid;
+@property(nonatomic, copy) NSString *bundleID;
+@property(nonatomic, strong) NSMutableArray<VMMemoryWriteUndoItem *> *items;
+@property(nonatomic, strong) NSDate *date;
+@end
+
 @interface VMMemoryEngine : NSObject
 
 @property(nonatomic, assign) pid_t targetPid;
@@ -188,6 +195,8 @@ typedef enum : NSUInteger {
                                 detail:(NSString *)detail
                               dataType:(VMDataType)type;
 - (BOOL)restoreMemoryTimelineAtIndex:(NSUInteger)index;
+- (BOOL)canRestoreMemoryTimelineValuesAtIndex:(NSUInteger)index;
+- (NSUInteger)restoreMemoryTimelineValuesAtIndex:(NSUInteger)index;
 - (void)removeMemoryTimelineAtIndex:(NSUInteger)index;
 - (void)clearMemoryTimeline;
 
@@ -199,7 +208,18 @@ typedef enum : NSUInteger {
 - (VMMemoryWriteUndoItem *)lastManualWriteUndoForAddress:(uint64_t)address
                                                     type:(VMDataType)type;
 - (BOOL)undoLastManualWriteForAddress:(uint64_t)address type:(VMDataType)type;
+- (NSUInteger)performManualBatchWrites:(NSArray<NSDictionary *> *)writes;
+- (BOOL)canUndoLastManualWriteBatch;
+- (NSUInteger)lastManualWriteBatchCount;
+- (NSUInteger)undoLastManualWriteBatch;
 - (void)clearManualWriteUndo;
+
+- (NSUInteger)captureValueSnapshotForKey:(NSString *)key
+                                   items:(NSArray<NSDictionary *> *)items;
+- (BOOL)hasValueSnapshotForKey:(NSString *)key;
+- (NSUInteger)valueSnapshotCountForKey:(NSString *)key;
+- (NSUInteger)restoreValueSnapshotForKey:(NSString *)key;
+- (void)clearAllValueSnapshots;
 
 - (void)scanPointersPointingToAddresses:(NSSet<NSNumber *> *)targets
                              rangeStart:(uint64_t)start
@@ -291,7 +311,7 @@ typedef enum : NSUInteger {
 - (NSString *)readAddress:(uint64_t)address type:(VMDataType)type;
 
 - (BOOL)readFromSnapshot:(uint64_t)address buffer:(void *)buffer size:(size_t)size;
-- (void)writeAddress:(uint64_t)address
+- (BOOL)writeAddress:(uint64_t)address
                value:(NSString *)value
                 type:(VMDataType)type;
 - (NSData *)readRawMemory:(uint64_t)address length:(size_t)len;

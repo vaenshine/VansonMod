@@ -204,7 +204,7 @@ public:
     uint64_t fileOffset;
   };
   
-  void fastFuzzyInit();  
+  void fastFuzzyInit(uint64_t start = 0, uint64_t end = 0);
   size_t getFastFuzzyAddressCount() const;  
   
   bool hasFastFuzzySnapshot() const { return !_fastFuzzySnapshot.empty() || _resultCount > 0; }
@@ -222,6 +222,8 @@ public:
 
   void setStoragePath(const std::string &path, const std::string &swapPath);
   bool restoreResultsFromFile(const std::string &filePath, size_t resultCount);
+  size_t restoreValuesFromFile(const std::string &filePath,
+                               size_t resultCount, size_t maxCount);
   std::vector<ScanResult> getResults(size_t start, size_t count);
   size_t getResultCount() const { return _resultCount; }
   void clearResults() { _resultCount = 0; }  
