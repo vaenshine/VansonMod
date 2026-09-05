@@ -3,6 +3,8 @@
 
 std::map<std::string, std::string> Lang_AR::getStrings() {
   return {
+    {"Str_Undo_Button", "تراجع"},
+    {"Str_Reload_Button", "تحديث"},
     
     {"Btn_Save", "حفظ"},
     {"Btn_Cancel", "إلغاء"},

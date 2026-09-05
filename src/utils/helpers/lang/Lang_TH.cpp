@@ -3,6 +3,8 @@
 
 std::map<std::string, std::string> Lang_TH::getStrings() {
   return {
+    {"Str_Undo_Button", "เลิกทำ"},
+    {"Str_Reload_Button", "โหลดใหม่"},
     
     {"Btn_Save", "บันทึก"},
     {"Btn_Cancel", "ยกเลิก"},

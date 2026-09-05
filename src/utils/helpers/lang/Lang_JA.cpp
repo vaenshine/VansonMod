@@ -3,6 +3,8 @@
 
 std::map<std::string, std::string> Lang_JA::getStrings() {
   return {
+    {"Str_Undo_Button", "元に戻す"},
+    {"Str_Reload_Button", "再読込"},
     
     {"Btn_Save", "保存"},
     {"Btn_Cancel", "キャンセル"},

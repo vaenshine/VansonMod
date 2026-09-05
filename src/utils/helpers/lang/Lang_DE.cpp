@@ -3,6 +3,8 @@
 
 std::map<std::string, std::string> Lang_DE::getStrings() {
   return {
+    {"Str_Undo_Button", "Rückgängig"},
+    {"Str_Reload_Button", "Neu laden"},
     
     {"Btn_Save", "Speichern"},
     {"Btn_Cancel", "Abbrechen"},

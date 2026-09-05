@@ -31,6 +31,8 @@ VansonMod_FILES = \
 	src/ui/memory/VMHexRowEditorViewController.mm \
 	src/ui/memory/VMMemoryBrowserViewController.mm \
 	src/ui/memory/VMMemoryActionSheet.mm \
+	src/ui/memory/VMStringEditorViewController.mm \
+	src/ui/memory/VMStringMemorySession.mm \
 	src/ui/memory/VMSignatureSearchViewController.mm \
 	src/ui/memory/VMModuleListViewController.mm \
 	src/ui/pointer/VMPointerSearchViewController.mm \

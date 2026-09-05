@@ -13,6 +13,7 @@
 #import "include/VMMemoryEngine.h"
 #import "include/VMPointerChain.h"
 #import <objc/message.h>
+#import "VMStringEditorViewController.h"
 #define TR(key) ([[VMLocalization shared] localizedString:key])
 @interface VMMemoryActionSheet : NSObject
 + (NSUInteger)writeSizeForType:(VMDataType)type
@@ -21,41 +22,7 @@
 @end
 
 @implementation VMMemoryActionSheet
-static const NSUInteger VM_STRING_EDIT_MAX_LEN = 8192;
 
-+ (BOOL)isVisibleStringByte:(uint8_t)b {
-  return (b >= 0x20 && b <= 0x7E) || b >= 0xC0;
-}
-
-+ (NSString *)visibleStringAtAddress:(uint64_t)address
-                            fallback:(NSString *)fallback
-                           lengthOut:(NSUInteger *)lengthOut {
-  NSData *data = [[VMMemoryEngine shared] readRawMemory:address
-                                                 length:VM_STRING_EDIT_MAX_LEN];
-  NSUInteger fallbackLen = [fallback lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-  if (data.length == 0) {
-    if (lengthOut) *lengthOut = fallbackLen;
-    return fallback ?: @"";
-  }
-
-  const uint8_t *bytes = (const uint8_t *)data.bytes;
-  NSUInteger len = 0;
-  while (len < data.length && len < VM_STRING_EDIT_MAX_LEN) {
-    if (bytes[len] == '\0') break;
-    if (![self isVisibleStringByte:bytes[len]]) break;
-    len++;
-  }
-  if (len == 0) {
-    if (lengthOut) *lengthOut = fallbackLen;
-    return fallback ?: @"";
-  }
-
-  NSString *str = [[NSString alloc] initWithBytes:bytes
-                                           length:len
-                                         encoding:NSUTF8StringEncoding];
-  if (lengthOut) *lengthOut = str ? len : fallbackLen;
-  return str ?: (fallback ?: @"");
-}
 
 + (UIViewController *)getTopViewController {
   UIWindow *window = nil;
@@ -100,7 +67,7 @@ static const NSUInteger VM_STRING_EDIT_MAX_LEN = 8192;
   return top;
 }
 
-+ (void)safePresentAlert:(UIAlertController *)alert
++ (void)safePresentAlert:(UIViewController *)alert
                     from:(UIViewController *)baseVC {
   dispatch_async(dispatch_get_main_queue(), ^{
     UIViewController *top = baseVC;
@@ -485,86 +452,52 @@ static const NSUInteger VM_STRING_EDIT_MAX_LEN = 8192;
 + (void)showStringModifyAlert:(uint64_t)address
                           val:(NSString *)val
                          inVC:(UIViewController *)vc {
-  NSUInteger originalLen = 0;
-  NSString *raw = [self visibleStringAtAddress:address
-                                      fallback:val
-                                     lengthOut:&originalLen];
-  NSString *addrMsg = [NSString stringWithFormat:TR(@"Alert_Edit_Addr_Msg"), address];
-  NSString *msg = [NSString stringWithFormat:@"%@\n%@ %lu\n\n\n\n\n\n\n\n\n\n",
-                                             addrMsg,
-                                             TR(@"Browser_Str_OrigLen"),
-                                             (unsigned long)originalLen];
-  UIAlertController *alert =
-      [UIAlertController alertControllerWithTitle:TR(@"Browser_Str_Edit")
-                                          message:msg
-                                   preferredStyle:UIAlertControllerStyleAlert];
-
-  UITextView *textView = [[UITextView alloc] initWithFrame:CGRectZero];
-  textView.text = raw ?: @"";
-  textView.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
-  textView.layer.borderWidth = 0.5;
-  textView.layer.borderColor = [UIColor.separatorColor CGColor];
-  textView.layer.cornerRadius = 6.0;
-  textView.translatesAutoresizingMaskIntoConstraints = NO;
-  [alert.view addSubview:textView];
-  [NSLayoutConstraint activateConstraints:@[
-    [textView.leadingAnchor constraintEqualToAnchor:alert.view.leadingAnchor constant:18],
-    [textView.trailingAnchor constraintEqualToAnchor:alert.view.trailingAnchor constant:-18],
-    [textView.topAnchor constraintEqualToAnchor:alert.view.topAnchor constant:104],
-    [textView.heightAnchor constraintEqualToConstant:220],
-  ]];
-
-  __weak __typeof(vc) weakVC = vc;
-  void (^writeBlock)(NSString *) = ^(NSString *newVal) {
-    NSString *oldVal = raw ?: @"";
-    NSUInteger newLen = [newVal lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-    NSUInteger oldSize = MAX(originalLen + 1, newLen + 1);
-    NSData *oldData = [[VMMemoryEngine shared] readRawMemory:address length:oldSize];
-    [[VMMemoryEngine shared] rememberManualWriteUndoAtAddress:address
-                                                        type:VMDataTypeString
-                                                    oldValue:oldVal
-                                                     oldData:oldData
-                                                    newValue:newVal];
-    [[VMMemoryEngine shared] writeAddress:address value:newVal type:VMDataTypeString];
-    [self showToast:TR(@"Msg_Mod_Success") inVC:weakVC];
-    if ([weakVC respondsToSelector:@selector(doRefreshValues)]) {
-      [weakVC performSelector:@selector(doRefreshValues)];
-    }
+  VMMemoryEngine *engine = [VMMemoryEngine shared];
+  pid_t pid = engine.targetPid;
+  mach_port_t task = engine.targetTask;
+  VMStringMemorySession *session = [VMStringMemorySession new];
+  session.targetIsValid = ^BOOL {
+    return pid > 0 && task != MACH_PORT_NULL &&
+           engine.targetPid == pid && engine.targetTask == task;
   };
-
-  [alert addAction:[UIAlertAction
-                       actionWithTitle:TR(@"Btn_Confirm")
-                                 style:UIAlertActionStyleDestructive
-                               handler:^(UIAlertAction *a) {
-                                 NSString *newVal = textView.text ?: @"";
-                                 NSUInteger newLen = [newVal lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-                                 if (newLen > originalLen) {
-                                   NSString *warnMsg =
-                                       [NSString stringWithFormat:TR(@"Browser_Str_Overflow_Msg"),
-                                                                  (unsigned long)originalLen,
-                                                                  (unsigned long)newLen];
-                                   UIAlertController *warn =
-                                       [UIAlertController alertControllerWithTitle:TR(@"Browser_Str_Overflow")
-                                                                           message:warnMsg
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-                                   [warn addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
-                                                                           style:UIAlertActionStyleCancel
-                                                                         handler:nil]];
-                                   [warn addAction:[UIAlertAction actionWithTitle:TR(@"Browser_Str_Force_Write")
-                                                                           style:UIAlertActionStyleDestructive
-                                                                         handler:^(UIAlertAction *a2) {
-                                                                           writeBlock(newVal);
-                                                                         }]];
-                                   [self safePresentAlert:warn from:weakVC];
-                                 } else {
-                                   writeBlock(newVal);
-                                 }
-                               }]];
-
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
-                                            style:UIAlertActionStyleCancel
-                                          handler:nil]];
-  [self safePresentAlert:alert from:vc];
+  session.reader = ^NSData *(uint64_t addr, NSUInteger length) {
+    if (engine.targetPid != pid || engine.targetTask != task) return nil;
+    return [engine readRawMemory:addr length:length];
+  };
+  session.writer = ^BOOL(uint64_t addr, NSData *data) {
+    if (engine.targetPid != pid || engine.targetTask != task) return NO;
+    BOOL ok = [engine writeRawData:data toAddress:addr];
+    if (ok) {
+      const uint8_t *bytes = (const uint8_t *)data.bytes;
+      NSUInteger length = 0;
+      while (length < data.length && bytes[length] != 0) length++;
+      NSString *value = [[NSString alloc] initWithBytes:bytes length:length encoding:NSUTF8StringEncoding];
+      if (value) {
+        for (NSMutableDictionary *entry in engine.lockedItems) {
+          if ([entry[@"addr"] unsignedLongLongValue] == addr &&
+              [entry[@"type"] integerValue] == VMDataTypeString) entry[@"val"] = value;
+        }
+      }
+    }
+    return ok;
+  };
+  session.didWrite = ^(uint64_t addr, NSData *before, NSData *after) {
+    [engine rememberManualWriteUndoAtAddress:addr type:VMDataTypeString
+        oldValue:[VMStringMemorySession escapedTextForData:before]
+        oldData:before newValue:[VMStringMemorySession escapedTextForData:after]];
+  };
+  VMStringEditorViewController *editor = [VMStringEditorViewController new];
+  editor.session = session;
+  editor.initialAddress = address;
+  __weak __typeof(vc) weakVC = vc;
+  editor.didChangeMemory = ^{
+    if ([weakVC respondsToSelector:@selector(doRefreshValues)])
+      [weakVC performSelector:@selector(doRefreshValues)];
+  };
+  UINavigationController *navigation =
+      [[UINavigationController alloc] initWithRootViewController:editor];
+  navigation.modalPresentationStyle = UIModalPresentationFullScreen;
+  [self safePresentAlert:navigation from:vc];
 }
 
 + (NSUInteger)writeSizeForType:(VMDataType)type

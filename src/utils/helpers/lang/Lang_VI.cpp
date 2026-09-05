@@ -3,6 +3,8 @@
 
 std::map<std::string, std::string> Lang_VI::getStrings() {
   return {
+    {"Str_Undo_Button", "Hoàn tác"},
+    {"Str_Reload_Button", "Tải lại"},
     
     {"Btn_Save", "Lưu"},
     {"Btn_Cancel", "Hủy"},

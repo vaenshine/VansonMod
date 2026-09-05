@@ -3,6 +3,8 @@
 
 std::map<std::string, std::string> Lang_KO::getStrings() {
   return {
+    {"Str_Undo_Button", "실행 취소"},
+    {"Str_Reload_Button", "새로고침"},
     
     {"Btn_Save", "저장"},
     {"Btn_Cancel", "취소"},
