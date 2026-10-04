@@ -53,9 +53,12 @@ Em dispositivos com jailbreak, o VansonMod também desbloqueia fluxos mais profu
 
 ## Capturas de ecrã
 
-| <div align="center"><img src="./Screenshots/APP_SELECT.PNG" width="100%" alt="APP_SELECT"/></div> | <div align="center"><img src="./Screenshots/MEM_BROWSER.PNG" width="100%" alt="MEM_BROWSER"/></div> | <div align="center"><img src="./Screenshots/MEM_DEBUG.PNG" width="100%" alt="MEM_DEBUG"/></div> | <div align="center"><img src="./Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="MEM_HEX_MIX"/></div> |
-| :------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------: |
-| <div align="center"><img src="./Screenshots/RVA_MANAGER.PNG" width="100%" alt="RVA_MANAGER"/></div> | <div align="center"><img src="./Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="POINTER_ANALYSIS"/></div> | <div align="center"><img src="./Screenshots/POINTER_VERIFY.PNG" width="100%" alt="POINTER_VERIFY"/></div> | <div align="center"><img src="./Screenshots/POINTER_LOCKER.PNG" width="100%" alt="POINTER_LOCKER"/></div> |
+Pré-visualização da interface v3.5. As aplicações e os dados apresentados são exemplos de demonstração.
+
+| <div align="center"><img src="../Screenshots/APP_SELECT.PNG" width="100%" alt="Seleção de processos"/></div> | <div align="center"><img src="../Screenshots/MEM_DEBUG.PNG" width="100%" alt="Depuração de memória"/></div> | <div align="center"><img src="../Screenshots/MEM_BROWSER.PNG" width="100%" alt="Navegador de memória"/></div> | <div align="center"><img src="../Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="Vista Hex mista"/></div> |
+| :---: | :---: | :---: | :---: |
+| <div align="center"><img src="../Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="Análise de ponteiros"/></div> | <div align="center"><img src="../Screenshots/POINTER_VERIFY.PNG" width="100%" alt="Verificação de ponteiros"/></div> | <div align="center"><img src="../Screenshots/POINTER_LOCKER.PNG" width="100%" alt="Bloqueio de ponteiros"/></div> | <div align="center"><img src="../Screenshots/RVA_MANAGER.PNG" width="100%" alt="Gestor RVA"/></div> |
+| <div align="center"><img src="../Screenshots/SCRIPT_EDITOR.PNG" width="100%" alt="Editor de scripts"/></div> | <div align="center"><img src="../Screenshots/SCRIPT_CREATE.PNG" width="100%" alt="Criar um script"/></div> | <div align="center"><img src="../Screenshots/SETTINGS.PNG" width="100%" alt="Definições"/></div> | <div align="center"><img src="../Screenshots/SETTINGS_DARK.PNG" width="100%" alt="Definições no modo escuro"/></div> |
 
 ---
 

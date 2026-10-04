@@ -55,9 +55,12 @@
 
 ## 应用截图
 
-| <div align="center"><img src="./Screenshots/APP_SELECT.PNG" width="100%" alt="APP_SELECT"/></div> | <div align="center"><img src="./Screenshots/MEM_BROWSER.PNG" width="100%" alt="MEM_BROWSER"/></div> | <div align="center"><img src="./Screenshots/MEM_DEBUG.PNG" width="100%" alt="MEM_DEBUG"/></div> | <div align="center"><img src="./Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="MEM_HEX_MIX"/></div> |
-| :------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------: |
-| <div align="center"><img src="./Screenshots/RVA_MANAGER.PNG" width="100%" alt="RVA_MANAGER"/></div> | <div align="center"><img src="./Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="POINTER_ANALYSIS"/></div> | <div align="center"><img src="./Screenshots/POINTER_VERIFY.PNG" width="100%" alt="POINTER_VERIFY"/></div> | <div align="center"><img src="./Screenshots/POINTER_LOCKER.PNG" width="100%" alt="POINTER_LOCKER"/></div> |
+v3.5 界面预览，应用与数据均为演示示例。
+
+| <div align="center"><img src="../Screenshots/APP_SELECT.PNG" width="100%" alt="进程选择"/></div> | <div align="center"><img src="../Screenshots/MEM_DEBUG.PNG" width="100%" alt="内存调试"/></div> | <div align="center"><img src="../Screenshots/MEM_BROWSER.PNG" width="100%" alt="内存浏览器"/></div> | <div align="center"><img src="../Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="Hex 混合视图"/></div> |
+| :---: | :---: | :---: | :---: |
+| <div align="center"><img src="../Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="指针分析"/></div> | <div align="center"><img src="../Screenshots/POINTER_VERIFY.PNG" width="100%" alt="指针验证"/></div> | <div align="center"><img src="../Screenshots/POINTER_LOCKER.PNG" width="100%" alt="指针锁定"/></div> | <div align="center"><img src="../Screenshots/RVA_MANAGER.PNG" width="100%" alt="RVA 管理器"/></div> |
+| <div align="center"><img src="../Screenshots/SCRIPT_EDITOR.PNG" width="100%" alt="脚本编辑器"/></div> | <div align="center"><img src="../Screenshots/SCRIPT_CREATE.PNG" width="100%" alt="新增脚本"/></div> | <div align="center"><img src="../Screenshots/SETTINGS.PNG" width="100%" alt="设置"/></div> | <div align="center"><img src="../Screenshots/SETTINGS_DARK.PNG" width="100%" alt="深色模式设置"/></div> |
 
 ---
 

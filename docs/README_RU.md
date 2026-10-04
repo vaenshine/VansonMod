@@ -53,9 +53,12 @@
 
 ## Скриншоты
 
-| <div align="center"><img src="./Screenshots/APP_SELECT.PNG" width="100%" alt="APP_SELECT"/></div> | <div align="center"><img src="./Screenshots/MEM_BROWSER.PNG" width="100%" alt="MEM_BROWSER"/></div> | <div align="center"><img src="./Screenshots/MEM_DEBUG.PNG" width="100%" alt="MEM_DEBUG"/></div> | <div align="center"><img src="./Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="MEM_HEX_MIX"/></div> |
-| :------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------: |
-| <div align="center"><img src="./Screenshots/RVA_MANAGER.PNG" width="100%" alt="RVA_MANAGER"/></div> | <div align="center"><img src="./Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="POINTER_ANALYSIS"/></div> | <div align="center"><img src="./Screenshots/POINTER_VERIFY.PNG" width="100%" alt="POINTER_VERIFY"/></div> | <div align="center"><img src="./Screenshots/POINTER_LOCKER.PNG" width="100%" alt="POINTER_LOCKER"/></div> |
+Предварительный просмотр интерфейса v3.5. Все показанные приложения и данные — демонстрационные примеры.
+
+| <div align="center"><img src="../Screenshots/APP_SELECT.PNG" width="100%" alt="Выбор процесса"/></div> | <div align="center"><img src="../Screenshots/MEM_DEBUG.PNG" width="100%" alt="Отладка памяти"/></div> | <div align="center"><img src="../Screenshots/MEM_BROWSER.PNG" width="100%" alt="Обозреватель памяти"/></div> | <div align="center"><img src="../Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="Смешанный Hex-режим"/></div> |
+| :---: | :---: | :---: | :---: |
+| <div align="center"><img src="../Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="Анализ указателей"/></div> | <div align="center"><img src="../Screenshots/POINTER_VERIFY.PNG" width="100%" alt="Проверка указателей"/></div> | <div align="center"><img src="../Screenshots/POINTER_LOCKER.PNG" width="100%" alt="Блокировка указателей"/></div> | <div align="center"><img src="../Screenshots/RVA_MANAGER.PNG" width="100%" alt="Менеджер RVA"/></div> |
+| <div align="center"><img src="../Screenshots/SCRIPT_EDITOR.PNG" width="100%" alt="Редактор скриптов"/></div> | <div align="center"><img src="../Screenshots/SCRIPT_CREATE.PNG" width="100%" alt="Создание скрипта"/></div> | <div align="center"><img src="../Screenshots/SETTINGS.PNG" width="100%" alt="Настройки"/></div> | <div align="center"><img src="../Screenshots/SETTINGS_DARK.PNG" width="100%" alt="Настройки в тёмной теме"/></div> |
 
 ---
 

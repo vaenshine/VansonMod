@@ -124,3 +124,13 @@ bash tests/run_update_manager_tests.sh <booted-simulator-udid>
 更新弹框专项：`bash tests/run_ui_review.sh <booted-simulator-udid> --update-ui-only`。10 个深浅色小屏状态从设置版本行进入真实 UIKit 弹框，覆盖 TrollStore、缺少安装包、DEB 渠道、安装器未就绪与跳转失败。检查安装动作、关闭动画期间失败提示衔接，以及返回设置后再次打开的可用性。本轮 611 项离线更新检查与 10 个 UI 状态均通过；设备覆盖安装需在 TrollStore 环境验证。
 
 表单提示专项：`bash tests/run_ui_review.sh <booted-simulator-udid> --form-hints-only`。15 个场景覆盖新增脚本、编辑信息及指针/锁定/RVA 弹框，检查作者标签和默认值分离、输入提示完整性，以及多行提示在输入、删除、程序赋值时的显示切换。截图保留脚本新增初始态和说明清空态。
+
+### README 展示截图
+
+```sh
+bash tests/run_release_screenshots.sh <booted-simulator-udid>
+```
+
+使用 Apple Silicon iPhone 模拟器生成 `Screenshots/` 中的 12 张展示图，覆盖进程、内存、指针、RVA、脚本表单及深浅色设置。页面由正式 UIKit 控制器绘制；应用、Bundle ID、PID、内存和列表结果均为固定演示数据。截图程序使用独立标识 `com.vanson.local.releasescreenshots`，每次重建自己的沙盒，并在全部截图成功后替换公开图片。
+
+`ReleaseScreenshotHarness.mm` 和两个截图 fixture 头文件仅用于此独立程序；正式应用的构建入口保持独立。构建日志与抓图日志位于 `.theos/release-screenshots/`。生成后逐张检查图片，并核对根目录和 `docs/` 中各 README 的相对路径。

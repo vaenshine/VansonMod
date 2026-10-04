@@ -53,9 +53,12 @@
 
 ## 스크린샷
 
-| <div align="center"><img src="./Screenshots/APP_SELECT.PNG" width="100%" alt="APP_SELECT"/></div> | <div align="center"><img src="./Screenshots/MEM_BROWSER.PNG" width="100%" alt="MEM_BROWSER"/></div> | <div align="center"><img src="./Screenshots/MEM_DEBUG.PNG" width="100%" alt="MEM_DEBUG"/></div> | <div align="center"><img src="./Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="MEM_HEX_MIX"/></div> |
-| :------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------: |
-| <div align="center"><img src="./Screenshots/RVA_MANAGER.PNG" width="100%" alt="RVA_MANAGER"/></div> | <div align="center"><img src="./Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="POINTER_ANALYSIS"/></div> | <div align="center"><img src="./Screenshots/POINTER_VERIFY.PNG" width="100%" alt="POINTER_VERIFY"/></div> | <div align="center"><img src="./Screenshots/POINTER_LOCKER.PNG" width="100%" alt="POINTER_LOCKER"/></div> |
+v3.5 화면 미리보기입니다. 표시된 앱과 데이터는 모두 데모용 예시입니다.
+
+| <div align="center"><img src="../Screenshots/APP_SELECT.PNG" width="100%" alt="프로세스 선택"/></div> | <div align="center"><img src="../Screenshots/MEM_DEBUG.PNG" width="100%" alt="메모리 디버깅"/></div> | <div align="center"><img src="../Screenshots/MEM_BROWSER.PNG" width="100%" alt="메모리 브라우저"/></div> | <div align="center"><img src="../Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="Hex 혼합 보기"/></div> |
+| :---: | :---: | :---: | :---: |
+| <div align="center"><img src="../Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="포인터 분석"/></div> | <div align="center"><img src="../Screenshots/POINTER_VERIFY.PNG" width="100%" alt="포인터 검증"/></div> | <div align="center"><img src="../Screenshots/POINTER_LOCKER.PNG" width="100%" alt="포인터 잠금"/></div> | <div align="center"><img src="../Screenshots/RVA_MANAGER.PNG" width="100%" alt="RVA 관리자"/></div> |
+| <div align="center"><img src="../Screenshots/SCRIPT_EDITOR.PNG" width="100%" alt="스크립트 편집기"/></div> | <div align="center"><img src="../Screenshots/SCRIPT_CREATE.PNG" width="100%" alt="스크립트 추가"/></div> | <div align="center"><img src="../Screenshots/SETTINGS.PNG" width="100%" alt="설정"/></div> | <div align="center"><img src="../Screenshots/SETTINGS_DARK.PNG" width="100%" alt="다크 모드 설정"/></div> |
 
 ---
 

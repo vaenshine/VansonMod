@@ -53,9 +53,12 @@ Trên thiết bị đã jailbreak, VansonMod còn mở rộng sang các quy trì
 
 ## Ảnh chụp màn hình
 
-| <div align="center"><img src="./Screenshots/APP_SELECT.PNG" width="100%" alt="APP_SELECT"/></div> | <div align="center"><img src="./Screenshots/MEM_BROWSER.PNG" width="100%" alt="MEM_BROWSER"/></div> | <div align="center"><img src="./Screenshots/MEM_DEBUG.PNG" width="100%" alt="MEM_DEBUG"/></div> | <div align="center"><img src="./Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="MEM_HEX_MIX"/></div> |
-| :------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------: |
-| <div align="center"><img src="./Screenshots/RVA_MANAGER.PNG" width="100%" alt="RVA_MANAGER"/></div> | <div align="center"><img src="./Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="POINTER_ANALYSIS"/></div> | <div align="center"><img src="./Screenshots/POINTER_VERIFY.PNG" width="100%" alt="POINTER_VERIFY"/></div> | <div align="center"><img src="./Screenshots/POINTER_LOCKER.PNG" width="100%" alt="POINTER_LOCKER"/></div> |
+Xem trước giao diện v3.5. Các ứng dụng và dữ liệu được hiển thị đều là ví dụ minh họa.
+
+| <div align="center"><img src="../Screenshots/APP_SELECT.PNG" width="100%" alt="Chọn tiến trình"/></div> | <div align="center"><img src="../Screenshots/MEM_DEBUG.PNG" width="100%" alt="Gỡ lỗi bộ nhớ"/></div> | <div align="center"><img src="../Screenshots/MEM_BROWSER.PNG" width="100%" alt="Trình duyệt bộ nhớ"/></div> | <div align="center"><img src="../Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="Chế độ xem Hex hỗn hợp"/></div> |
+| :---: | :---: | :---: | :---: |
+| <div align="center"><img src="../Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="Phân tích con trỏ"/></div> | <div align="center"><img src="../Screenshots/POINTER_VERIFY.PNG" width="100%" alt="Xác minh con trỏ"/></div> | <div align="center"><img src="../Screenshots/POINTER_LOCKER.PNG" width="100%" alt="Khóa con trỏ"/></div> | <div align="center"><img src="../Screenshots/RVA_MANAGER.PNG" width="100%" alt="Trình quản lý RVA"/></div> |
+| <div align="center"><img src="../Screenshots/SCRIPT_EDITOR.PNG" width="100%" alt="Trình chỉnh sửa tập lệnh"/></div> | <div align="center"><img src="../Screenshots/SCRIPT_CREATE.PNG" width="100%" alt="Tạo tập lệnh"/></div> | <div align="center"><img src="../Screenshots/SETTINGS.PNG" width="100%" alt="Cài đặt"/></div> | <div align="center"><img src="../Screenshots/SETTINGS_DARK.PNG" width="100%" alt="Cài đặt ở chế độ tối"/></div> |
 
 ---
 

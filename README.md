@@ -55,9 +55,12 @@ On jailbroken devices, VansonMod unlocks deeper code-level workflows such as **R
 
 ## Screenshots
 
-| <div align="center"><img src="./Screenshots/APP_SELECT.PNG" width="100%" alt="APP_SELECT"/></div> | <div align="center"><img src="./Screenshots/MEM_BROWSER.PNG" width="100%" alt="MEM_BROWSER"/></div> | <div align="center"><img src="./Screenshots/MEM_DEBUG.PNG" width="100%" alt="MEM_DEBUG"/></div> | <div align="center"><img src="./Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="MEM_HEX_MIX"/></div> |
-| :------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------: |
-| <div align="center"><img src="./Screenshots/RVA_MANAGER.PNG" width="100%" alt="RVA_MANAGER"/></div> | <div align="center"><img src="./Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="POINTER_ANALYSIS"/></div> | <div align="center"><img src="./Screenshots/POINTER_VERIFY.PNG" width="100%" alt="POINTER_VERIFY"/></div> | <div align="center"><img src="./Screenshots/POINTER_LOCKER.PNG" width="100%" alt="POINTER_LOCKER"/></div> |
+v3.5 interface preview. All apps and data shown are demonstration examples.
+
+| <div align="center"><img src="./Screenshots/APP_SELECT.PNG" width="100%" alt="Process selection"/></div> | <div align="center"><img src="./Screenshots/MEM_DEBUG.PNG" width="100%" alt="Memory debugging"/></div> | <div align="center"><img src="./Screenshots/MEM_BROWSER.PNG" width="100%" alt="Memory browser"/></div> | <div align="center"><img src="./Screenshots/MEM_HEX_MIX.PNG" width="100%" alt="Mixed Hex view"/></div> |
+| :---: | :---: | :---: | :---: |
+| <div align="center"><img src="./Screenshots/POINTER_ANALYSIS.PNG" width="100%" alt="Pointer analysis"/></div> | <div align="center"><img src="./Screenshots/POINTER_VERIFY.PNG" width="100%" alt="Pointer verification"/></div> | <div align="center"><img src="./Screenshots/POINTER_LOCKER.PNG" width="100%" alt="Pointer locking"/></div> | <div align="center"><img src="./Screenshots/RVA_MANAGER.PNG" width="100%" alt="RVA manager"/></div> |
+| <div align="center"><img src="./Screenshots/SCRIPT_EDITOR.PNG" width="100%" alt="Script editor"/></div> | <div align="center"><img src="./Screenshots/SCRIPT_CREATE.PNG" width="100%" alt="Create a script"/></div> | <div align="center"><img src="./Screenshots/SETTINGS.PNG" width="100%" alt="Settings"/></div> | <div align="center"><img src="./Screenshots/SETTINGS_DARK.PNG" width="100%" alt="Settings in dark mode"/></div> |
 
 ---
 
