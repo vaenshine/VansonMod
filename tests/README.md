@@ -131,6 +131,6 @@ bash tests/run_update_manager_tests.sh <booted-simulator-udid>
 bash tests/run_release_screenshots.sh <booted-simulator-udid>
 ```
 
-使用 Apple Silicon iPhone 模拟器生成 `Screenshots/` 中的 12 张展示图，覆盖进程、内存、指针、RVA、脚本表单及深浅色设置。页面由正式 UIKit 控制器绘制；应用、Bundle ID、PID、内存和列表结果均为固定演示数据。截图程序使用独立标识 `com.vanson.local.releasescreenshots`，每次重建自己的沙盒，并在全部截图成功后替换公开图片。
+使用 Apple Silicon iPhone 模拟器生成 `Screenshots/` 中的 12 张英文展示图，界面与演示文本统一使用英文，覆盖进程、内存、指针、RVA、脚本表单及深浅色设置。页面由正式 UIKit 控制器绘制；应用、Bundle ID、PID、内存和列表结果均为固定演示数据。截图程序使用独立标识 `com.vanson.local.releasescreenshots`，每次重建自己的沙盒，并在全部截图成功后替换公开图片。
 
 `ReleaseScreenshotHarness.mm` 和两个截图 fixture 头文件仅用于此独立程序；正式应用的构建入口保持独立。构建日志与抓图日志位于 `.theos/release-screenshots/`。生成后逐张检查图片，并核对根目录和 `docs/` 中各 README 的相对路径。

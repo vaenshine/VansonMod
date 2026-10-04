@@ -15,7 +15,7 @@
 
 static NSArray<VMPointerChain *> *VMReleaseDemoPointerChains(void) {
   NSMutableArray<VMPointerChain *> *chains = [NSMutableArray array];
-  NSArray<NSString *> *titles = @[@"训练计数", @"演示能量", @"场景开关", @"移动速度", @"进度计数", @"演示分数"];
+  NSArray<NSString *> *titles = @[@"Training Count", @"Demo Energy", @"Scene Toggle", @"Move Speed", @"Progress Count", @"Demo Score"];
   NSArray<NSString *> *values = @[@"100", @"250", @"1", @"1.25", @"100", @"250"];
   for (NSUInteger index = 0; index < titles.count; index++) {
     VMPointerChain *chain = [VMPointerChain new];
@@ -48,7 +48,7 @@ static NSArray<VMPointerChain *> *VMReleaseDemoPointerChains(void) {
 
 static NSArray<VMRVAPatch *> *VMReleaseDemoRVAPatches(void) {
   NSMutableArray<VMRVAPatch *> *patches = [NSMutableArray array];
-  NSArray<NSString *> *titles = @[@"训练计数 · 100", @"演示能量 · 250", @"场景显示开关"];
+  NSArray<NSString *> *titles = @[@"Training Count · 100", @"Demo Energy · 250", @"Scene Visibility"];
   NSArray<NSString *> *patched = @[@"64 00 00 00", @"FA 00 00 00", @"01 00 00 00"];
   NSArray<NSString *> *original = @[@"32 00 00 00", @"64 00 00 00", @"00 00 00 00"];
   for (NSUInteger index = 0; index < titles.count; index++) {
@@ -90,7 +90,8 @@ static NSArray<VMRVAPatch *> *VMReleaseDemoRVAPatches(void) {
 }
 - (void)viewWillDisappear:(BOOL)animated {}
 - (void)updateStatsLabel {
-  ((UILabel *)[self valueForKey:@"statsLabel"]).text = @"搜索结果: 8";
+  ((UILabel *)[self valueForKey:@"statsLabel"]).text =
+      [NSString stringWithFormat:@"%@: 8", [[VMLocalization shared] localizedString:@"Mod_Results_Count"]];
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
   return 8;
@@ -135,7 +136,8 @@ static NSArray<VMRVAPatch *> *VMReleaseDemoRVAPatches(void) {
 - (BOOL)tryAutoAttach { return NO; }
 - (void)updateStatusUI {
   UILabel *name = [self valueForKey:@"appNameLabel"];
-  name.text = @"Atlas Demo - 已连接";
+  name.text = [NSString stringWithFormat:@"Atlas Demo - %@",
+               [[VMLocalization shared] localizedString:@"Status_Connected"]];
   name.textColor = UIColor.labelColor;
   ((UILabel *)[self valueForKey:@"bundleIdLabel"]).text = @"com.example.atlasdemo";
   UIImageView *icon = [self valueForKey:@"statusIcon"];

@@ -105,7 +105,7 @@ static void ReleaseInstallFixtures(void) {
   [defaults removeObjectForKey:@"vm_bottom_tab_order"];
   [defaults removeObjectForKey:@"vm_settings_group"];
   [defaults registerDefaults:@{@"resultLimit":@100, @"floatTolerance":@.001, @"groupRange":@"0x100", @"lockInterval":@.5}];
-  [VMLocalization.shared setLanguage:@"zh-Hans"];
+  [VMLocalization.shared setLanguage:@"en"];
   ReleaseInstallFixtures();
   [VMUIHelper installAppearance];
   self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
@@ -128,16 +128,16 @@ static void ReleaseInstallFixtures(void) {
 }
 - (UIViewController *)scriptEditor {
   VMScriptModel *model = [VMScriptModel new];
-  model.note = @"示例结果读取";
+  model.note = @"Read Results";
   model.author = @"VansonMod";
-  model.desc = @"读取示例数据并输出结果";
+  model.desc = @"Read demo values";
   model.bundleID = @"com.example.atlasdemo";
-  model.scriptContent = @"// Atlas Demo · 只读示例\nconst results = vm.getResults(5, 0);\nconst count = vm.getResultsCount();\n\nvm.log('Atlas Demo');\nvm.log('结果数：' + count);\n\nfor (const row of results) {\n  vm.log(row.address + '  ' +\n    row.value);\n}\n";
+  model.scriptContent = @"// Atlas Demo · read-only example\nconst results = vm.getResults(5, 0);\nconst count = vm.getResultsCount();\n\nvm.log('Atlas Demo');\nvm.log('Results: ' + count);\n\nfor (const row of results) {\n  vm.log(row.address + '  ' +\n    row.value);\n}\n";
   VMScriptViewController *page = [VMScriptViewController new];
   page.scriptModel = model;
   [page loadViewIfNeeded];
   UITextView *console = [page valueForKey:@"consoleView"];
-  console.text = @"Atlas Demo\n结果数：12\n0x100806000  100\n0x100806020  100\n0x100806040  250\n0x100806060  100\n0x100806080  100";
+  console.text = @"Atlas Demo\nResults: 12\n0x100806000  100\n0x100806020  100\n0x100806040  250\n0x100806060  100\n0x100806080  100";
   return page;
 }
 - (void)nextCapture {
