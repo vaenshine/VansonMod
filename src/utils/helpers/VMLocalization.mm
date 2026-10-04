@@ -1,5 +1,6 @@
 #import "include/VMLocalization.h"
 #include "LocalizationCore.hpp"
+#import "VMLanguageRefresh.h"
 
 @interface VMLocalization ()
 @end
@@ -71,10 +72,12 @@
 }
 
 - (void)setLanguage:(NSString *)lang {
+  VMLanguageTrace(@"preferences-write-begin");
   [[NSUserDefaults standardUserDefaults] setObject:lang forKey:@"user_lang"];
-  [[NSUserDefaults standardUserDefaults] synchronize];
+  VMLanguageTrace(@"preferences-write-end");
 
   [self updateCoreLanguage];
+  VMLanguageTrace(@"translation-switch-end");
 }
 
 - (NSString *)localizedString:(NSString *)key {

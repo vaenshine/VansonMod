@@ -1,13 +1,25 @@
+#import "VMMemoryFeedback.h"
 #import "VMProcessAuditViewController.h"
 #import "include/VMMemoryEngine.h"
 #import "include/VMLocalization.h"
 #import "../../utils/helpers/VMUIHelper.h"
 #include "../../core/AuditCore.hpp"
 #include <mach/mach.h>
+#include <atomic>
 #include <sys/sysctl.h>
 extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 #define TR(key) ([[VMLocalization shared] localizedString:key])
+
+// AuditCore owns a single mutable snapshot. Every snapshot access uses this queue,
+// and the epoch identifies the controller/session that owns the current baseline.
+static std::atomic<uint64_t> VMAuditSnapshotEpoch{0};
+static dispatch_queue_t VMAuditOperationQueue(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ queue = dispatch_queue_create("com.vanson.audit.operations", DISPATCH_QUEUE_SERIAL); });
+    return queue;
+}
 
 @interface VMAuditDiffItem : NSObject
 @property (nonatomic, copy) NSString *moduleName;
@@ -23,11 +35,13 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 @interface VMProcessAuditViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSMutableArray<VMAuditDiffItem *> *diffItems;
-@property (nonatomic, assign) BOOL isMonitoring; 
+@property (nonatomic, assign) BOOL isMonitoring;
 @property (nonatomic, assign) BOOL hasScanned;
 @property (nonatomic, assign) pid_t targetPid;
 @property (nonatomic, assign) mach_port_t targetTask;
 @property (nonatomic, strong) NSTimer *pollTimer;
+@property (nonatomic, assign) BOOL isScanning;
+@property (nonatomic, assign) uint64_t snapshotEpoch;
 @end
 
 static const NSInteger kSectionInfo = 0;
@@ -63,6 +77,7 @@ static const NSInteger kSectionCount = 3;
 
 - (void)dealloc {
     [self stopPolling];
+    [self invalidateSnapshotSession];
 }
 
 - (void)viewDidLoad {
@@ -91,12 +106,14 @@ static const NSInteger kSectionCount = 3;
     CGRect tableFrame = self.view.bounds;
     self.tableView = [[UITableView alloc] initWithFrame:tableFrame
                                                   style:UITableViewStyleGrouped];
+    self.tableView.showsHorizontalScrollIndicator = NO;
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     self.tableView.backgroundColor = [UIColor clearColor];
     self.tableView.autoresizingMask =
         UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    self.tableView.estimatedRowHeight = 88;
     [self.view addSubview:self.tableView];
     [VMUIHelper addFixedFooterTo:self forTableView:self.tableView];
 }
@@ -163,6 +180,7 @@ static const NSInteger kSectionCount = 3;
 #pragma mark - Static Detection
 
 - (void)onStaticDetect {
+    if (self.isScanning) return;
     if (self.targetTask == MACH_PORT_NULL) {
         [self resolveTarget];
         if (self.targetTask == MACH_PORT_NULL) {
@@ -171,6 +189,8 @@ static const NSInteger kSectionCount = 3;
         }
     }
 
+    self.isScanning = YES;
+    [self.tableView reloadData];
     UIAlertController *loading = [UIAlertController
         alertControllerWithTitle:nil
                          message:[NSString stringWithFormat:@"%@...",
@@ -187,7 +207,7 @@ static const NSInteger kSectionCount = 3;
     ]];
     [self presentViewController:loading animated:YES completion:nil];
 
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+    dispatch_async(VMAuditOperationQueue(), ^{
         auto &audit = VMCore::AuditCore::getInstance();
         mach_port_t task = self.targetTask;
 
@@ -212,6 +232,7 @@ static const NSInteger kSectionCount = 3;
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
+            self.isScanning = NO;
             self.diffItems = diffs;
             self.hasScanned = YES;
             [self.tableView reloadData];
@@ -230,8 +251,15 @@ static const NSInteger kSectionCount = 3;
 #pragma mark - Dynamic Detection
 
 - (void)onDynamicDetect {
+    if (self.isScanning) return;
+    if (self.pollTimer) {
+        [self stopPolling];
+        self.isMonitoring = NO;
+        [self updateDynamicButtonTitle];
+        return;
+    }
     if (self.isMonitoring) {
-        
+
         [self performDynamicComparison];
         return;
     }
@@ -241,7 +269,7 @@ static const NSInteger kSectionCount = 3;
     }
 
     if (self.targetTask == MACH_PORT_NULL) {
-        
+
         [self startPollingForProcess];
         return;
     }
@@ -253,11 +281,11 @@ static const NSInteger kSectionCount = 3;
     self.isMonitoring = YES;
     [self updateDynamicButtonTitle];
 
-    self.pollTimer = [NSTimer scheduledTimerWithTimeInterval:0.5
-                                                      target:self
-                                                    selector:@selector(pollForProcess)
-                                                    userInfo:nil
-                                                     repeats:YES];
+    __weak __typeof(self) weakSelf = self;
+    self.pollTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) {
+        [weakSelf pollForProcess];
+    }];
+    [self updateDynamicButtonTitle];
 }
 
 - (void)pollForProcess {
@@ -307,6 +335,10 @@ static const NSInteger kSectionCount = 3;
                            dispatch_get_main_queue(), ^{
                 [self startDynamicMonitoring];
             });
+        } else {
+            self.isMonitoring = NO;
+            [self updateDynamicButtonTitle];
+            [self showToast:TR(@"Err_Not_Connected_Msg")];
         }
     }
 }
@@ -318,68 +350,90 @@ static const NSInteger kSectionCount = 3;
     }
 }
 
-- (void)startDynamicMonitoring {
-    auto &audit = VMCore::AuditCore::getInstance();
-    auto modules = audit.classifyModules(self.targetTask);
-    bool ok = audit.takeTextSnapshot(self.targetTask, modules);
-
-    if (!ok) {
-        [self showToast:TR(@"Audit_Snapshot_Fail")];
-        self.isMonitoring = NO;
-        [self updateDynamicButtonTitle];
-        return;
+- (void)invalidateSnapshotSession {
+    uint64_t epoch = self.snapshotEpoch;
+    self.snapshotEpoch = 0;
+    self.isMonitoring = NO;
+    if (epoch == 0) return;
+    uint64_t expected = epoch;
+    if (VMAuditSnapshotEpoch.compare_exchange_strong(expected, epoch + 1)) {
+        dispatch_async(VMAuditOperationQueue(), ^{
+            if (VMAuditSnapshotEpoch.load() == epoch + 1) VMCore::AuditCore::getInstance().clearSnapshot();
+        });
     }
+}
 
-    self.isMonitoring = YES;
+- (void)startDynamicMonitoring {
+    if (self.isScanning) return;
+    self.isScanning = YES;
+    uint64_t epoch = VMAuditSnapshotEpoch.fetch_add(1) + 1;
+    self.snapshotEpoch = epoch;
     [self updateDynamicButtonTitle];
-    [self showToast:TR(@"Audit_Monitoring")];
+    mach_port_t task = self.targetTask;
+    dispatch_async(VMAuditOperationQueue(), ^{
+        bool ok = false;
+        if (VMAuditSnapshotEpoch.load() == epoch) {
+            auto &audit = VMCore::AuditCore::getInstance();
+            auto modules = audit.classifyModules(task);
+            ok = audit.takeTextSnapshot(task, modules);
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.snapshotEpoch != epoch) return;
+            self.isScanning = NO;
+            self.isMonitoring = ok && VMAuditSnapshotEpoch.load() == epoch;
+            [self updateDynamicButtonTitle];
+            [self showToast:TR(self.isMonitoring ? @"Audit_Monitoring" : @"Audit_Snapshot_Fail")];
+        });
+    });
 }
 
 - (void)performDynamicComparison {
     if (self.targetTask == MACH_PORT_NULL) {
-        [self resolveTarget];
-        if (self.targetTask == MACH_PORT_NULL) {
-            [self showToast:TR(@"Audit_No_Process")];
-            return;
-        }
+        [self showToast:TR(@"Audit_No_Process")];
+        return;
     }
-
-    auto &audit = VMCore::AuditCore::getInstance();
-    if (!audit.hasSnapshot()) {
+    uint64_t epoch = self.snapshotEpoch;
+    if (epoch == 0 || VMAuditSnapshotEpoch.load() != epoch) {
+        self.isMonitoring = NO;
+        [self updateDynamicButtonTitle];
         [self showToast:TR(@"Audit_No_Snapshot")];
         return;
     }
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        auto diffEntries = audit.diffTextSegmentWithSnapshot(self.targetTask);
-
+    self.isScanning = YES;
+    [self updateDynamicButtonTitle];
+    mach_port_t task = self.targetTask;
+    dispatch_async(VMAuditOperationQueue(), ^{
+        auto &audit = VMCore::AuditCore::getInstance();
+        BOOL ownsSnapshot = VMAuditSnapshotEpoch.load() == epoch && audit.hasSnapshot();
         NSMutableArray *diffs = [NSMutableArray array];
-        for (auto &d : diffEntries) {
-            VMAuditDiffItem *item = [[VMAuditDiffItem alloc] init];
-            item.moduleName = [NSString stringWithUTF8String:d.moduleName.c_str()];
-            item.offset = d.offset;
-            item.runtimeAddress = d.runtimeAddress;
-            item.originalHex = [self hexFromBytes:d.originalBytes];
-            item.currentHex = [self hexFromBytes:d.currentBytes];
-            item.originalBytes = [NSData dataWithBytes:d.originalBytes.data()
-                                                length:d.originalBytes.size()];
-            [diffs addObject:item];
+        if (ownsSnapshot) {
+            auto diffEntries = audit.diffTextSegmentWithSnapshot(task);
+            for (auto &d : diffEntries) {
+                VMAuditDiffItem *item = [[VMAuditDiffItem alloc] init];
+                item.moduleName = [NSString stringWithUTF8String:d.moduleName.c_str()];
+                item.offset = d.offset;
+                item.runtimeAddress = d.runtimeAddress;
+                item.originalHex = [self hexFromBytes:d.originalBytes];
+                item.currentHex = [self hexFromBytes:d.currentBytes];
+                item.originalBytes = [NSData dataWithBytes:d.originalBytes.data() length:d.originalBytes.size()];
+                [diffs addObject:item];
+            }
+            audit.clearSnapshot();
         }
-
         dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.snapshotEpoch != epoch) return;
+            self.isScanning = NO;
+            self.isMonitoring = NO;
+            if (!ownsSnapshot || VMAuditSnapshotEpoch.load() != epoch) {
+                [self updateDynamicButtonTitle];
+                [self showToast:TR(@"Audit_No_Snapshot")];
+                return;
+            }
+            self.snapshotEpoch = 0;
             self.diffItems = diffs;
             self.hasScanned = YES;
-            self.isMonitoring = NO;
-            VMCore::AuditCore::getInstance().clearSnapshot();
-            [self updateDynamicButtonTitle];
             [self.tableView reloadData];
-
-            if (diffs.count > 0) {
-                [self showToast:[NSString stringWithFormat:@"%@ %lu %@",
-                    TR(@"Audit_Scan_Done"), (unsigned long)diffs.count, TR(@"Audit_TextDiff")]];
-            } else {
-                [self showToast:TR(@"Audit_No_Diff")];
-            }
+            [self showToast:diffs.count ? [NSString stringWithFormat:@"%@ %lu %@", TR(@"Audit_Scan_Done"), (unsigned long)diffs.count, TR(@"Audit_TextDiff")] : TR(@"Audit_No_Diff")];
         });
     });
 }
@@ -421,98 +475,64 @@ static const NSInteger kSectionCount = 3;
     if (indexPath.section == kSectionInfo) {
         UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"infoCell"];
         if (!cell) {
-            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
-                                          reuseIdentifier:@"infoCell"];
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"infoCell"];
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
             cell.backgroundColor = [UIColor clearColor];
-
-            UIView *cardView = [[UIView alloc] init];
-            cardView.tag = 1000;
-            cardView.layer.cornerRadius = 14;
-            cardView.backgroundColor = [self auditCardBackgroundColor];
-            [cell.contentView addSubview:cardView];
-
-            UILabel *titleLabel = [[UILabel alloc] init];
-            titleLabel.tag = 1003;
-            titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
-            titleLabel.textColor = [UIColor labelColor];
-            [cardView addSubview:titleLabel];
-
-            UILabel *bundleLabel = [[UILabel alloc] init];
-            bundleLabel.tag = 1004;
-            bundleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
-            bundleLabel.textColor = [self auditSecondaryTextColor];
-            [cardView addSubview:bundleLabel];
-
-            UILabel *statusLabel = [[UILabel alloc] init];
-            statusLabel.tag = 1005;
-            statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-            statusLabel.textAlignment = NSTextAlignmentCenter;
-            statusLabel.layer.cornerRadius = 8;
-            statusLabel.layer.masksToBounds = YES;
-            [cardView addSubview:statusLabel];
-
-            UIButton *staticBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-            staticBtn.tag = 1001;
-            staticBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-            staticBtn.layer.cornerRadius = 10;
-            staticBtn.layer.borderWidth = 0;
-            [staticBtn addTarget:self action:@selector(onStaticDetect) forControlEvents:UIControlEventTouchUpInside];
-            [cardView addSubview:staticBtn];
-
-            UIButton *dynamicBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-            dynamicBtn.tag = 1002;
-            dynamicBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-            dynamicBtn.layer.cornerRadius = 10;
-            dynamicBtn.layer.borderWidth = 0;
-            [dynamicBtn addTarget:self action:@selector(onDynamicDetect) forControlEvents:UIControlEventTouchUpInside];
-            [cardView addSubview:dynamicBtn];
+            UIView *card = [UIView new];
+            card.tag = 1000;
+            card.translatesAutoresizingMaskIntoConstraints = NO;
+            [VMUIHelper styleCard:card];
+            [cell.contentView addSubview:card];
+            UIStackView *stack = [UIStackView new];
+            stack.axis = UILayoutConstraintAxisVertical;
+            stack.spacing = 10;
+            stack.translatesAutoresizingMaskIntoConstraints = NO;
+            [card addSubview:stack];
+            for (NSInteger tag = 1003; tag <= 1005; tag++) {
+                UILabel *label = [UILabel new];
+                label.tag = tag;
+                label.numberOfLines = 0;
+                label.font = tag == 1003 ? [VMUIHelper scaledFontOfSize:20 weight:UIFontWeightSemibold] : [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular]];
+                label.adjustsFontForContentSizeCategory = YES;
+                if (tag == 1004) label.lineBreakMode = NSLineBreakByCharWrapping;
+                label.textColor = tag == 1003 ? [UIColor labelColor] : [UIColor secondaryLabelColor];
+                [stack addArrangedSubview:label];
+            }
+            UIButton *staticButton = [VMUIHelper createButtonWithTitle:TR(@"Audit_Static") color:[VMUIHelper accentColor] target:self action:@selector(onStaticDetect)];
+            staticButton.tag = 1001;
+            UIButton *dynamicButton = [VMUIHelper createButtonWithTitle:TR(@"Audit_Dynamic") color:[VMUIHelper accentColor] target:self action:@selector(onDynamicDetect)];
+            dynamicButton.tag = 1002;
+            [VMUIHelper styleButton:dynamicButton primary:NO];
+            UIStackView *actions = [[UIStackView alloc] initWithArrangedSubviews:@[staticButton, dynamicButton]];
+            actions.distribution = UIStackViewDistributionFillEqually;
+            actions.spacing = 12;
+            [actions.heightAnchor constraintEqualToConstant:48].active = YES;
+            [stack addArrangedSubview:actions];
+            [NSLayoutConstraint activateConstraints:@[
+                [card.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:8],
+                [card.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-8],
+                [card.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:16],
+                [card.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16],
+                [stack.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
+                [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
+                [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+                [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16]
+            ]];
         }
-
-        NSString *status = self.targetTask != MACH_PORT_NULL
-            ? [NSString stringWithFormat:@"PID: %d", self.targetPid]
-            : TR(@"Audit_Not_Running");
-
-        UIView *cardView = [cell.contentView viewWithTag:1000];
-        UILabel *titleLabel = [cardView viewWithTag:1003];
-        UILabel *bundleLabel = [cardView viewWithTag:1004];
-        UILabel *statusLabel = [cardView viewWithTag:1005];
-        UIButton *staticBtn = [cardView viewWithTag:1001];
-        UIButton *dynamicBtn = [cardView viewWithTag:1002];
-
-        cardView.backgroundColor = [self auditCardBackgroundColor];
-        titleLabel.text = self.appName ?: TR(@"App_Unknown");
-        bundleLabel.text = self.bundleID ?: @"";
-        statusLabel.text = status;
-
-        UIColor *primaryActionColor = [self auditPrimaryActionColor];
-        staticBtn.backgroundColor = [primaryActionColor colorWithAlphaComponent:0.12];
-        [staticBtn setTitleColor:primaryActionColor forState:UIControlStateNormal];
-
-        UIColor *secondaryActionColor = [self auditSecondaryActionColor];
-        dynamicBtn.backgroundColor = [secondaryActionColor colorWithAlphaComponent:0.12];
-        [dynamicBtn setTitleColor:secondaryActionColor forState:UIControlStateNormal];
-
-        BOOL isRunning = (self.targetTask != MACH_PORT_NULL);
-        statusLabel.backgroundColor = isRunning
-            ? [[UIColor systemGreenColor] colorWithAlphaComponent:0.14]
-            : [self auditStatusIdleBackgroundColor];
-        statusLabel.textColor = isRunning
-            ? [UIColor systemGreenColor]
-            : [self auditStatusIdleTextColor];
-
-        CGFloat contentW = tableView.bounds.size.width - 32;
-        cardView.frame = CGRectMake(16, 8, contentW, 120);
-        titleLabel.frame = CGRectMake(14, 12, contentW - 28, 22);
-        bundleLabel.frame = CGRectMake(14, 38, contentW - 140, 18);
-        statusLabel.frame = CGRectMake(contentW - 104, 34, 90, 24);
-        CGFloat buttonW = floor((contentW - 12) / 2.0);
-        staticBtn.frame = CGRectMake(14, 72, buttonW - 8, 34);
-        dynamicBtn.frame = CGRectMake(CGRectGetMaxX(staticBtn.frame) + 12, 66, buttonW, 36);
-        dynamicBtn.frame = CGRectMake(CGRectGetMaxX(staticBtn.frame) + 12, 72, buttonW - 8, 34);
-        [staticBtn setTitle:TR(@"Audit_Static") forState:UIControlStateNormal];
-        [dynamicBtn setTitle:(self.isMonitoring ? TR(@"Audit_Dynamic_Scan") : TR(@"Audit_Dynamic"))
-                    forState:UIControlStateNormal];
+        UILabel *title = [cell.contentView viewWithTag:1003];
+        UILabel *bundle = [cell.contentView viewWithTag:1004];
+        UILabel *status = [cell.contentView viewWithTag:1005];
+        title.text = self.appName ?: TR(@"App_Unknown");
+        bundle.text = self.bundleID ?: @"";
+        status.text = self.isScanning ? TR(@"Audit_Scanning") : self.pollTimer ? TR(@"Audit_No_Process") : self.isMonitoring ? TR(@"Audit_Monitoring") : self.targetTask != MACH_PORT_NULL ? [NSString stringWithFormat:@"PID %d", self.targetPid] : TR(@"Audit_Not_Running");
+        status.textColor = self.isScanning || self.isMonitoring ? [VMUIHelper accentColor] : [UIColor secondaryLabelColor];
+        UIButton *staticButton = [cell.contentView viewWithTag:1001];
+        UIButton *dynamicButton = [cell.contentView viewWithTag:1002];
+        staticButton.enabled = !self.isScanning && !self.isMonitoring;
+        dynamicButton.enabled = !self.isScanning;
+        staticButton.alpha = staticButton.enabled ? 1 : 0.45;
+        dynamicButton.alpha = dynamicButton.enabled ? 1 : 0.45;
+        [dynamicButton setTitle:TR(self.pollTimer ? @"Btn_Cancel" : self.isMonitoring ? @"Audit_Dynamic_Scan" : @"Audit_Dynamic") forState:UIControlStateNormal];
         return cell;
     }
 
@@ -531,7 +551,8 @@ static const NSInteger kSectionCount = 3;
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%@: %@\n%@: %@",
             TR(@"Audit_Original"), item.originalHex,
             TR(@"Audit_Current"), item.currentHex];
-        cell.detailTextLabel.numberOfLines = 2;
+        cell.detailTextLabel.numberOfLines = 0;
+        cell.textLabel.numberOfLines = 0;
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
         return cell;
@@ -553,13 +574,21 @@ static const NSInteger kSectionCount = 3;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (indexPath.section == kSectionInfo) {
-        return 136;
+    return UITableViewAutomaticDimension;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section != kSectionInfo || self.diffItems.count || self.isScanning) return nil;
+    if (self.hasScanned) return TR(@"Audit_No_Diff");
+    return TR(@"Audit_Info_Dynamic");
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    if (self.isMovingFromParentViewController) {
+        [self stopPolling];
+        [self invalidateSnapshotSession];
     }
-    if (indexPath.section == kSectionDiffs) {
-        return 74;
-    }
-    return 44;
 }
 
 #pragma mark - TableView Delegate
@@ -623,6 +652,10 @@ static const NSInteger kSectionCount = 3;
     bool ok = VMCore::AuditCore::getInstance().restoreBytes(
         self.targetTask, item.runtimeAddress, original);
 
+    if (ok) {
+        [self.diffItems removeObject:item];
+        [self.tableView reloadData];
+    }
     [self showToast:ok ? TR(@"Audit_Restored") : TR(@"Audit_Restore_Fail")];
 }
 
@@ -673,14 +706,7 @@ static const NSInteger kSectionCount = 3;
 }
 
 - (void)showToast:(NSString *)msg {
-    UIAlertController *alert = [UIAlertController
-        alertControllerWithTitle:nil message:msg
-                  preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:alert animated:YES completion:nil];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        [alert dismissViewControllerAnimated:YES completion:nil];
-    });
+    VMMemoryShowFeedback(self, msg);
 }
 
 @end

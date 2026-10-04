@@ -1,6 +1,8 @@
 #import "VMPatcherViewController.h"
 #import "../../utils/helpers/VMShareHelper.h"
 #import "../../utils/helpers/VMUIHelper.h"
+#import "../../utils/helpers/VMKeyboardAvoidance.h"
+#import "../common/VMFormSheetViewController.h"
 #import "../main/VMLockListViewController.h"
 #import "../memory/VMHexEditorViewController.h"
 #import "../memory/VMModuleListViewController.h"
@@ -27,6 +29,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate,
     UIDocumentPickerDelegate, VMRVAManagerCellDelegate>
 @property(nonatomic, assign) BOOL isShowingManager;
+@property(nonatomic, assign) uint64_t tempOriginalAddress;
+@property(nonatomic, assign) NSUInteger tempOriginalLength;
 @property(nonatomic, assign) BOOL showAllPatches;
 @property(nonatomic, strong) UIView *containerPatcher;
 @property(nonatomic, strong) UIView *containerManager;
@@ -42,6 +46,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 @property(nonatomic, strong) UIButton *saveBtn;
 @property(nonatomic, strong) UILabel *procNameLabel;
 @property(nonatomic, strong) UILabel *procDetailLabel;
+@property(nonatomic, strong) UIImageView *procIconView;
+@property(nonatomic, strong) UILabel *procPIDLabel;
+@property(nonatomic, strong) UILabel *procBundleIDLabel;
+@property(nonatomic, assign) NSUInteger moduleLoadGeneration;
 @property(nonatomic, strong) UILabel *moduleDetailLabel;
 @property(nonatomic, strong) UITableView *managerTableView;
 @property(nonatomic, strong) NSMutableArray<VMRVAPatch *> *filteredPatches;
@@ -55,8 +63,6 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 @property(nonatomic, strong) NSMutableDictionary *folderMetadata;
 @property(nonatomic, copy) NSString *lastAutoNavBundleID;
 @property(nonatomic, assign) BOOL manuallyShowFolder;
-@property(nonatomic, strong)
-    UITextField *activeField; 
 @end
 @implementation VMPatcherViewController
 - (NSString *)rvaFolderNameForBundleID:(NSString *)bundleID {
@@ -238,7 +244,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   }
   self.title = TR(@"Patch_Title");
   self.tabBarItem.title = TR(@"Tab_Patch");
-  self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+  self.view.backgroundColor = [VMUIHelper canvasColor];
+  self.view.tintColor = [VMUIHelper accentColor];
   self.containerPatcher = [[UIView alloc] init];
   self.containerPatcher.translatesAutoresizingMaskIntoConstraints = NO;
   [self.view addSubview:self.containerPatcher];
@@ -300,17 +307,6 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
              name:@"VM_LockItemAdded"
            object:nil];
 
-  [[NSNotificationCenter defaultCenter]
-      addObserver:self
-         selector:@selector(keyboardWillShow:)
-             name:UIKeyboardWillShowNotification
-           object:nil];
-  [[NSNotificationCenter defaultCenter]
-      addObserver:self
-         selector:@selector(keyboardWillHide:)
-             name:UIKeyboardWillHideNotification
-           object:nil];
-
   [self.view setNeedsLayout];
   [self.view layoutIfNeeded];
 }
@@ -338,24 +334,31 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                           target:self
                                           action:@selector(exitBatchMode)];
       UIBarButtonItem *selAllBtn =
-          [[UIBarButtonItem alloc] initWithTitle:TR(@"Batch_Sel_All")
+          [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle"]
                                            style:UIBarButtonItemStylePlain
                                           target:self
                                           action:@selector(batchSelectAll)];
-      self.navigationItem.leftBarButtonItems = @[ cancelBtn, selAllBtn ];
-      self.navigationItem.rightBarButtonItem =
-          [[UIBarButtonItem alloc] initWithTitle:TR(@"Act_Export")
-                                           style:UIBarButtonItemStyleDone
-                                          target:self
-                                          action:@selector(performBatchShare)];
+      selAllBtn.accessibilityLabel = TR(@"Batch_Sel_All");
+      self.navigationItem.leftBarButtonItem = selAllBtn;
+      self.navigationItem.rightBarButtonItem = cancelBtn;
+      UIButton *exportBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+      [exportBtn setImage:[UIImage systemImageNamed:@"square.and.arrow.up"] forState:UIControlStateNormal];
+      exportBtn.accessibilityLabel = TR(@"Act_Export");
+      [exportBtn addTarget:self action:@selector(performBatchShare) forControlEvents:UIControlEventTouchUpInside];
       UIButton *delBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-      [delBtn setTitle:TR(@"Act_Delete") forState:UIControlStateNormal];
-      [delBtn setTitleColor:[UIColor systemRedColor]
-                   forState:UIControlStateNormal];
+      [delBtn setImage:[UIImage systemImageNamed:@"trash"] forState:UIControlStateNormal];
+      delBtn.tintColor = UIColor.systemRedColor;
+      delBtn.accessibilityLabel = TR(@"Act_Delete");
       [delBtn addTarget:self
                     action:@selector(batchDelete)
           forControlEvents:UIControlEventTouchUpInside];
-      self.navigationItem.titleView = delBtn;
+      UIStackView *actions = [[UIStackView alloc] initWithArrangedSubviews:@[exportBtn, delBtn]];
+      actions.spacing = 12;
+      for (UIButton *button in @[exportBtn, delBtn]) {
+        [button.widthAnchor constraintEqualToConstant:44].active = YES;
+        [button.heightAnchor constraintEqualToConstant:44].active = YES;
+      }
+      self.navigationItem.titleView = actions;
     } else {
       if (self.isFolderMode) {
         UIBarButtonItem *backBtn = [[UIBarButtonItem alloc]
@@ -369,7 +372,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                     style:UIBarButtonItemStylePlain
                    target:self
                    action:@selector(importPatches)];
-        self.navigationItem.rightBarButtonItem = importBtn;
+        importBtn.accessibilityLabel = TR(@"Act_Import");
+        UIBarButtonItem *select = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checklist"] style:UIBarButtonItemStylePlain target:self action:@selector(enterBatchMode)];
+        select.accessibilityLabel = TR(@"Btn_Batch_Select");
+        self.navigationItem.rightBarButtonItems = @[importBtn, select];
         self.navigationItem.title = TR(@"Patch_Seg_Manager");
       } else {
         UIBarButtonItem *listBtn = [[UIBarButtonItem alloc]
@@ -383,7 +389,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                     style:UIBarButtonItemStylePlain
                    target:self
                    action:@selector(importPatches)];
-        self.navigationItem.rightBarButtonItem = importBtn;
+        importBtn.accessibilityLabel = TR(@"Act_Import");
+        UIBarButtonItem *select = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checklist"] style:UIBarButtonItemStylePlain target:self action:@selector(enterBatchMode)];
+        select.accessibilityLabel = TR(@"Btn_Batch_Select");
+        self.navigationItem.rightBarButtonItems = @[importBtn, select];
         NSString *name = self.folderMetadata[self.viewingBundleID][@"name"];
         self.navigationItem.title = name ?: self.viewingBundleID;
       }
@@ -623,6 +632,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     }
     [VMMemoryEngine shared].rvaPatches = [self.filteredPatches mutableCopy];
   }
+  NSUInteger count = self.isFolderMode ? self.folderList.count : self.filteredPatches.count;
+  self.managerTableView.backgroundView = count == 0 ? [VMUIHelper emptyStateWithTitle:TR(@"Patch_Seg_Manager") message:TR(@"Patch_Empty") symbol:@"square.stack.3d.up"] : nil;
   [self.managerTableView reloadData];
 }
 
@@ -658,6 +669,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 - (void)viewWillAppear:(BOOL)animated {
   [super viewWillAppear:animated];
+  [self refreshProcessIdentity];
   if (self.isShowingManager) {
     [self checkSmartNavigation];
     dispatch_after(
@@ -678,9 +690,11 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.scrollView.translatesAutoresizingMaskIntoConstraints =
       NO; 
   self.scrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+  self.scrollView.showsHorizontalScrollIndicator = NO;
   self.scrollView.alwaysBounceVertical =
       YES; 
   [self.containerPatcher addSubview:self.scrollView];
+  [VMKeyboardAvoidance installForScrollView:self.scrollView];
 
   [NSLayoutConstraint activateConstraints:@[
     [self.scrollView.topAnchor
@@ -695,7 +709,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
   self.mainStack = [[UIStackView alloc] init];
   self.mainStack.axis = UILayoutConstraintAxisVertical;
-  self.mainStack.spacing = 20;
+  self.mainStack.spacing = 16;
   self.mainStack.translatesAutoresizingMaskIntoConstraints = NO;
   [self.scrollView addSubview:self.mainStack];
 
@@ -705,7 +719,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [NSLayoutConstraint activateConstraints:@[
     
     [self.mainStack.topAnchor constraintEqualToAnchor:contentGuide.topAnchor
-                                             constant:15],
+                                             constant:16],
     [self.mainStack.leadingAnchor
         constraintEqualToAnchor:contentGuide.leadingAnchor
                        constant:16],
@@ -720,6 +734,11 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                                constant:-32]
   ]];
 
+  UIButton *manager = [VMUIHelper createButtonWithTitle:TR(@"Patch_Seg_Manager") color:[VMUIHelper accentColor] target:self action:@selector(toggleViewMode)];
+  [manager setImage:[UIImage systemImageNamed:@"square.stack.3d.up"] forState:UIControlStateNormal];
+  [VMUIHelper styleButton:manager primary:NO];
+  [manager.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [self.mainStack addArrangedSubview:manager];
   [self setupBinaryInfoSection];
   [self setupTargetSection];
   [self setupValueSection];
@@ -738,7 +757,33 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       [self createLabel:TR(@"Patch_Wait_Attach")
                    font:[UIFont systemFontOfSize:16 weight:UIFontWeightBold]
                   color:[UIColor labelColor]];
-  [stack addArrangedSubview:self.procNameLabel];
+  self.procNameLabel.numberOfLines = 0;
+  self.procIconView = [[UIImageView alloc] initWithImage:[VMUIHelper applicationIconForBundleID:nil]];
+  self.procIconView.contentMode = UIViewContentModeScaleAspectFit;
+  self.procIconView.layer.cornerRadius = 12;
+  self.procIconView.clipsToBounds = YES;
+  self.procIconView.tintColor = [VMUIHelper accentColor];
+  [self.procIconView.widthAnchor constraintEqualToConstant:52].active = YES;
+  [self.procIconView.heightAnchor constraintEqualToConstant:52].active = YES;
+  self.procPIDLabel = [self createLabel:@"PID: —"
+                                 font:[UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular]
+                                color:UIColor.secondaryLabelColor];
+  self.procBundleIDLabel = [self createLabel:@""
+                                       font:[UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular]
+                                      color:UIColor.secondaryLabelColor];
+  self.procBundleIDLabel.lineBreakMode = NSLineBreakByCharWrapping;
+  self.procBundleIDLabel.accessibilityIdentifier = @"rva.process.bundle-id";
+  self.procBundleIDLabel.accessibilityLabel = TR(@"Lab_BundleId");
+  self.procBundleIDLabel.hidden = YES;
+  [self.procBundleIDLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+  UIStackView *identity = [[UIStackView alloc] initWithArrangedSubviews:@[self.procNameLabel, self.procPIDLabel, self.procBundleIDLabel]];
+  identity.axis = UILayoutConstraintAxisVertical;
+  identity.spacing = 5;
+  [identity setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+  UIStackView *processRow = [[UIStackView alloc] initWithArrangedSubviews:@[self.procIconView, identity]];
+  processRow.alignment = UIStackViewAlignmentCenter;
+  processRow.spacing = 12;
+  [stack addArrangedSubview:processRow];
   self.procDetailLabel =
       [self createLabel:@"Base: - | Size: -"
                    font:[UIFont monospacedSystemFontOfSize:12
@@ -757,22 +802,21 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       addArrangedSubview:[self createSectionTitle:TR(@"RVA_Section_Target")]];
   self.moduleField = [self createTextField:TR(@"RVA_Select_Hint")];
   self.moduleField.text = TR(@"RVA_Select_Hint");
-  self.moduleField.textColor = [UIColor systemOrangeColor];
-  UITapGestureRecognizer *copyTap =
-      [[UITapGestureRecognizer alloc] initWithTarget:self
-                                              action:@selector(copyModuleName)];
-  [self.moduleField addGestureRecognizer:copyTap];
+  self.moduleField.textColor = [UIColor secondaryLabelColor];
   [self addSelectButtonToField:self.moduleField
                         action:@selector(openModuleSelector)];
   self.moduleField.delegate = self;
   [stack addArrangedSubview:self.moduleField];
   self.moduleDetailLabel =
-      [self createLabel:@"Select a framework to see details"
+      [self createLabel:TR(@"RVA_Select_Hint")
                    font:[UIFont systemFontOfSize:11 weight:UIFontWeightRegular]
                   color:[UIColor systemGrayColor]];
-  self.moduleDetailLabel.numberOfLines = 2;
+  self.moduleDetailLabel.numberOfLines = 0;
+  self.moduleDetailLabel.hidden = YES;
   [stack addArrangedSubview:self.moduleDetailLabel];
-  self.offsetField = [self createTextField:@"Offset (e.g. 0x1002A)"];
+  [stack addArrangedSubview:[self createSectionTitle:TR(@"Sig_Label_Offset")]];
+  self.offsetField = [self createTextField:TR(@"Placeholder_Hex_Short")];
+  self.offsetField.accessibilityLabel = TR(@"Sig_Label_Offset");
   UILabel *prefix = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 30, 30)];
   prefix.text = @" 0x";
   prefix.textColor = [UIColor secondaryLabelColor];
@@ -798,9 +842,12 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.finalAddrLabel.text = @"---";
   self.finalAddrLabel.font =
       [UIFont monospacedSystemFontOfSize:20 weight:UIFontWeightBold];
-  self.finalAddrLabel.textColor = [UIColor systemBlueColor];
+  self.finalAddrLabel.textColor = [VMUIHelper accentColor];
   self.finalAddrLabel.textAlignment = NSTextAlignmentCenter;
   self.finalAddrLabel.userInteractionEnabled = YES;
+  self.finalAddrLabel.numberOfLines = 0;
+  self.finalAddrLabel.accessibilityTraits = UIAccessibilityTraitButton;
+  self.finalAddrLabel.accessibilityHint = TR(@"Pop_Options");
   [self.finalAddrLabel
       addGestureRecognizer:[[UITapGestureRecognizer alloc]
                                initWithTarget:self
@@ -812,14 +859,16 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [bgResult addSubview:self.finalAddrLabel];
   self.finalAddrLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [NSLayoutConstraint activateConstraints:@[
-    [self.finalAddrLabel.centerXAnchor
-        constraintEqualToAnchor:bgResult.centerXAnchor],
+    [self.finalAddrLabel.leadingAnchor constraintEqualToAnchor:bgResult.leadingAnchor constant:12],
+    [self.finalAddrLabel.trailingAnchor constraintEqualToAnchor:bgResult.trailingAnchor constant:-12],
     [self.finalAddrLabel.centerYAnchor
         constraintEqualToAnchor:bgResult.centerYAnchor],
-    [bgResult.heightAnchor constraintEqualToConstant:44]
+    [bgResult.heightAnchor constraintGreaterThanOrEqualToConstant:52],
+    [self.finalAddrLabel.topAnchor constraintEqualToAnchor:bgResult.topAnchor constant:12],
+    [self.finalAddrLabel.bottomAnchor constraintEqualToAnchor:bgResult.bottomAnchor constant:-12]
   ]];
   [stack addArrangedSubview:bgResult];
-  self.hexField = [self createTextField:@"E0 03 1F 2A"];
+  self.hexField = [self createTextField:TR(@"RVA_Patch_Hex_Placeholder")];
   self.hexField.autocapitalizationType =
       UITextAutocapitalizationTypeAllCharacters;
   self.hexField.delegate = self;
@@ -829,7 +878,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       [self createLabel:TR(@"RVA_Waiting_Input")
                    font:[UIFont italicSystemFontOfSize:12]
                   color:[UIColor systemGrayColor]];
-  self.previewInstructionLabel.textAlignment = NSTextAlignmentRight;
+  self.previewInstructionLabel.textAlignment = NSTextAlignmentNatural;
   [stack addArrangedSubview:self.previewInstructionLabel];
   [self.mainStack addArrangedSubview:card];
 }
@@ -844,7 +893,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   UIScrollView *hScroll = [[UIScrollView alloc] init];
   hScroll.showsHorizontalScrollIndicator = NO;
   hScroll.translatesAutoresizingMaskIntoConstraints = NO;
-  [hScroll.heightAnchor constraintEqualToConstant:50].active = YES;
+  [hScroll.heightAnchor constraintGreaterThanOrEqualToConstant:56].active = YES;
   UIStackView *hStack = [[UIStackView alloc] init];
   hStack.axis = UILayoutConstraintAxisHorizontal;
   hStack.spacing = 10;
@@ -891,18 +940,21 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 - (void)setupActionButtons {
   UIStackView *btnStack = [[UIStackView alloc] init];
-  btnStack.axis = UILayoutConstraintAxisHorizontal;
-  btnStack.spacing = 15;
+  btnStack.axis = UILayoutConstraintAxisVertical;
+  btnStack.spacing = 10;
   btnStack.distribution = UIStackViewDistributionFillEqually;
   self.saveBtn = [self createStandardButton:TR(@"Btn_Save")
-                                      color:[UIColor systemOrangeColor]
+                                      color:[VMUIHelper accentColor]
                                      action:@selector(savePatchAction)];
   self.patchBtn = [self createStandardButton:TR(@"Patch_Btn")
-                                       color:[UIColor systemRedColor]
+                                       color:[VMUIHelper accentColor]
                                       action:@selector(doPatch)];
   [btnStack addArrangedSubview:self.saveBtn];
   [btnStack addArrangedSubview:self.patchBtn];
-  [btnStack.heightAnchor constraintEqualToConstant:44].active = YES;
+  [self.saveBtn.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [self.patchBtn.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [VMUIHelper styleButton:self.saveBtn primary:NO];
+  [VMUIHelper styleButton:self.patchBtn primary:YES];
   [self.mainStack addArrangedSubview:btnStack];
 }
 
@@ -911,7 +963,9 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                    color:(UIColor *)color {
   UILabel *l = [UILabel new];
   l.text = text;
-  l.font = font;
+  l.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:font];
+  l.adjustsFontForContentSizeCategory = YES;
+  l.numberOfLines = 0;
   l.textColor = color;
   l.translatesAutoresizingMaskIntoConstraints = NO;
   return l;
@@ -919,8 +973,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 - (UIView *)createCardView {
   UIView *v = [[UIView alloc] init];
-  v.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-  v.layer.cornerRadius = 12;
+  [VMUIHelper styleCard:v];
   return v;
 }
 
@@ -934,20 +987,22 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 - (void)pinStackToCard:(UIStackView *)stack card:(UIView *)card {
   [NSLayoutConstraint activateConstraints:@[
-    [stack.topAnchor constraintEqualToAnchor:card.topAnchor constant:15],
-    [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-15],
+    [stack.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
+    [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
     [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor
-                                        constant:15],
+                                        constant:16],
     [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor
-                                         constant:-15]
+                                         constant:-16]
   ]];
 }
 
 - (UILabel *)createSectionTitle:(NSString *)text {
   UILabel *l = [[UILabel alloc] init];
   l.text = text;
-  l.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
-  l.textColor = [UIColor systemGrayColor];
+  l.font = [VMUIHelper scaledFontOfSize:14 weight:UIFontWeightSemibold];
+  l.adjustsFontForContentSizeCategory = YES;
+  l.numberOfLines = 0;
+  l.textColor = [UIColor secondaryLabelColor];
   return l;
 }
 
@@ -962,6 +1017,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   btn.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
   btn.contentEdgeInsets = UIEdgeInsetsMake(8, 12, 8, 12);
   btn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+  [VMUIHelper styleButton:btn primary:NO];
+  [btn.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
   btn.accessibilityValue = hex;
   btn.accessibilityHint = desc;
   [btn addTarget:self
@@ -977,6 +1034,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [btn setTitle:title forState:UIControlStateNormal];
   [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
   btn.backgroundColor = color;
+  btn.tintColor = color;
   btn.titleLabel.font = [UIFont boldSystemFontOfSize:15];
   btn.layer.cornerRadius = 8;
   [btn addTarget:self action:sel forControlEvents:UIControlEventTouchUpInside];
@@ -998,38 +1056,31 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                            target:self
                            action:@selector(dismissKeyboard)];
   tb.items = @[ space, done ];
+  [VMUIHelper styleConfirmationItem:done];
   tf.inputAccessoryView = tb;
 }
 
-- (UITextField *)createTextField:(NSString *)ph {
-  UITextField *tf = [UITextField new];
-  tf.borderStyle = UITextBorderStyleRoundedRect;
-  tf.placeholder = ph;
-  tf.font = [UIFont fontWithName:@"Menlo" size:14];
-  tf.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
-  tf.keyboardType = UIKeyboardTypeASCIICapable;
-  [tf.heightAnchor constraintEqualToConstant:40].active = YES;
-  return tf;
+- (UITextField *)createTextField:(NSString *)placeholder {
+  UITextField *field = [UITextField new];
+  field.placeholder = placeholder;
+  field.accessibilityLabel = placeholder;
+  [VMUIHelper styleTextField:field];
+  field.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledFontForFont:[UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular]];
+  field.keyboardType = UIKeyboardTypeASCIICapable;
+  [field.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [self addDoneToolBar:field];
+  return field;
 }
 
-- (void)addSelectButtonToField:(UITextField *)tf action:(SEL)sel {
-  UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-  [btn setTitle:TR(@"Btn_Select_Fwk") forState:UIControlStateNormal];
-  [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-  btn.backgroundColor = [UIColor systemBlueColor];
-  btn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-  btn.layer.cornerRadius = 6;
-
-  btn.frame = CGRectMake(0, 0, 60, 28);
-
-  UIView *rightView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 68, 28)];
-  [rightView addSubview:btn];
-  btn.frame = CGRectMake(4, 0, 60, 28);
-
-  [btn addTarget:self action:sel forControlEvents:UIControlEventTouchUpInside];
-
-  tf.rightView = rightView;
-  tf.rightViewMode = UITextFieldViewModeAlways;
+- (void)addSelectButtonToField:(UITextField *)field action:(SEL)selector {
+  UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+  [button setImage:[UIImage systemImageNamed:@"chevron.down.circle.fill"] forState:UIControlStateNormal];
+  button.accessibilityLabel = TR(@"Btn_Select_Fwk");
+  button.tintColor = [VMUIHelper accentColor];
+  button.frame = CGRectMake(0, 0, 44, 44);
+  [button addTarget:self action:selector forControlEvents:UIControlEventTouchUpInside];
+  field.rightView = button;
+  field.rightViewMode = UITextFieldViewModeAlways;
 }
 
 - (void)copyModuleName {
@@ -1056,8 +1107,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (void)handleModuleSelection:(VMModuleInfo *)module {
+  if (self.selectedModule != module) self.tempOriginalHex = nil;
   self.selectedModule = module;
   if (module) {
+    self.moduleDetailLabel.hidden = NO;
     self.moduleField.text = module.name;
     self.moduleField.textColor = [UIColor labelColor];
     NSString *sizeStr = [NSByteCountFormatter
@@ -1070,19 +1123,40 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     [self calculateFinalAddress];
   } else {
     self.moduleField.text = TR(@"RVA_Select_Hint");
-    self.moduleField.textColor = [UIColor systemOrangeColor];
+    self.moduleField.textColor = [UIColor secondaryLabelColor];
     self.moduleDetailLabel.text = @"-";
+    self.moduleDetailLabel.hidden = YES;
     self.finalAddrLabel.text = @"---";
   }
 }
 
+- (void)refreshProcessIdentity {
+  VMMemoryEngine *engine = [VMMemoryEngine shared];
+  BOOL connected = engine.targetTask != MACH_PORT_NULL;
+  NSString *bundleID = connected ? engine.currentBundleID : nil;
+  self.procNameLabel.text = connected ? (engine.currentProcessName.length ? engine.currentProcessName : TR(@"App_Unknown")) : TR(@"Patch_Wait_Attach");
+  self.procPIDLabel.text = connected ? [NSString stringWithFormat:@"PID: %d", engine.targetPid] : @"PID: —";
+  self.procBundleIDLabel.text = bundleID.length ? bundleID : @"Bundle ID: —";
+  self.procBundleIDLabel.accessibilityValue = bundleID.length ? bundleID : @"—";
+  self.procBundleIDLabel.hidden = !connected;
+  self.procIconView.image = [VMUIHelper applicationIconForBundleID:bundleID];
+}
+
 - (void)loadModules {
-  if ([VMMemoryEngine shared].targetTask == MACH_PORT_NULL)
+  VMMemoryEngine *engine = [VMMemoryEngine shared];
+  NSUInteger generation = ++self.moduleLoadGeneration;
+  pid_t targetPID = engine.targetPid;
+  mach_port_t targetTask = engine.targetTask;
+  NSString *bundleID = [engine.currentBundleID copy];
+  NSString *procName = [engine.currentProcessName copy];
+  uint64_t mainAddr = engine.mainModuleAddress;
+  [self refreshProcessIdentity];
+  if (targetTask == MACH_PORT_NULL) {
+    self.procDetailLabel.text = @"Base: - | Size: -";
     return;
+  }
   dispatch_async(
       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        uint64_t mainAddr = [VMMemoryEngine shared].mainModuleAddress;
-        NSString *procName = [VMMemoryEngine shared].currentProcessName;
         NSString *binaryName = procName;
         uint64_t size = 0;
         NSArray *mods = [[VMMemoryEngine shared] loadRemoteModules];
@@ -1094,7 +1168,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
           }
         }
         dispatch_async(dispatch_get_main_queue(), ^{
-          self.procNameLabel.text = binaryName ?: @"Unknown Process";
+          if (generation != self.moduleLoadGeneration || engine.targetPid != targetPID || engine.targetTask != targetTask || ![(engine.currentBundleID ?: @"") isEqualToString:(bundleID ?: @"")]) return;
+          if (!procName.length && binaryName.length) self.procNameLabel.text = binaryName;
           NSString *sizeStr = [NSByteCountFormatter
               stringFromByteCount:size
                        countStyle:NSByteCountFormatterCountStyleMemory];
@@ -1114,26 +1189,29 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 - (BOOL)textFieldShouldBeginEditing:(UITextField *)textField {
   if (textField == self.moduleField) {
-    [self copyModuleName];
+    [self openModuleSelector];
     return NO;
   }
-  self.activeField = textField;
   return YES;
 }
 
-- (void)textFieldDidEndEditing:(UITextField *)textField {
-  self.activeField = nil;
+- (BOOL)readOffset:(uint64_t *)offset {
+  NSString *text = [self.offsetField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+  if ([text.lowercaseString hasPrefix:@"0x"]) text = [text substringFromIndex:2];
+  NSScanner *scanner = [NSScanner scannerWithString:text ?: @""];
+  scanner.charactersToBeSkipped = nil;
+  unsigned long long value = 0;
+  if (text.length == 0 || ![scanner scanHexLongLong:&value] || !scanner.isAtEnd) return NO;
+  if (self.selectedModule && value > UINT64_MAX - self.selectedModule.loadAddress) return NO;
+  *offset = value;
+  return YES;
 }
 
 - (void)calculateFinalAddress {
-  if (!self.selectedModule)
-    return;
-  NSString *s =
-      [self.offsetField.text stringByReplacingOccurrencesOfString:@"0x"
-                                                       withString:@""];
-  uint64_t o = strtoull(s.UTF8String, NULL, 16);
-  self.finalAddrLabel.text = [NSString
-      stringWithFormat:@"= 0x%llX", self.selectedModule.loadAddress + o];
+  uint64_t offset = 0;
+  BOOL valid = self.selectedModule && [self readOffset:&offset];
+  self.finalAddrLabel.text = valid ? [NSString stringWithFormat:@"0x%llX", self.selectedModule.loadAddress + offset] : @"---";
+  if (self.tempOriginalAddress != self.selectedModule.loadAddress + offset) self.tempOriginalHex = nil;
 }
 
 - (void)setupManagerUI {
@@ -1141,6 +1219,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       [[UITableView alloc] initWithFrame:CGRectZero
                                    style:UITableViewStyleInsetGrouped];
   self.managerTableView.translatesAutoresizingMaskIntoConstraints = NO;
+  [VMUIHelper styleTableView:self.managerTableView];
   self.managerTableView.delegate = self;
   self.managerTableView.dataSource = self;
   self.managerTableView.allowsMultipleSelectionDuringEditing = YES;
@@ -1299,7 +1378,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     }
     self.hexField.text = formatted;
     self.previewInstructionLabel.text =
-        [NSString stringWithFormat:@"Set: %@", desc];
+        [NSString stringWithFormat:@"%@", desc];
     UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc]
         initWithStyle:UIImpactFeedbackStyleMedium];
     [gen impactOccurred];
@@ -1347,10 +1426,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     [self showToast:TR(@"Patch_Select_Msg")];
     return;
   }
-  NSString *offsetStr =
-      [self.offsetField.text stringByReplacingOccurrencesOfString:@"0x"
-                                                       withString:@""];
-  uint64_t offset = strtoull([offsetStr UTF8String], NULL, 16);
+  uint64_t offset = 0;
+  if (![self readOffset:&offset]) { [self showToast:TR(@"Ptr_Error_Invalid_Target")]; return; }
   uint64_t addr = self.selectedModule.loadAddress + offset;
 
   NSData *data = [[VMMemoryEngine shared] dataFromHexString:self.hexField.text];
@@ -1361,10 +1438,13 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
   mach_msg_type_number_t len = (mach_msg_type_number_t)data.length;
 
-  if (!self.tempOriginalHex) {
+  if (!self.tempOriginalHex || self.tempOriginalAddress != addr || self.tempOriginalLength != len) {
+    self.tempOriginalHex = nil;
     NSData *orig = [[VMMemoryEngine shared] readRawMemory:addr length:len];
     if (orig && orig.length == len) {
       self.tempOriginalHex = [[VMMemoryEngine shared] hexStringFromData:orig];
+      self.tempOriginalAddress = addr;
+      self.tempOriginalLength = len;
     }
   }
 
@@ -1404,7 +1484,11 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     else
       cell.textLabel.text = name;
     cell.detailTextLabel.text = [NSString
-        stringWithFormat:@"%@ (%lu Patches)", bid, (unsigned long)cnt];
+        stringWithFormat:@"%@ · %lu", bid, (unsigned long)cnt];
+    cell.textLabel.numberOfLines = 0;
+    cell.detailTextLabel.numberOfLines = 0;
+    cell.textLabel.font = [VMUIHelper scaledFontOfSize:16 weight:UIFontWeightSemibold];
+    cell.textLabel.adjustsFontForContentSizeCategory = YES;
     cell.imageView.image = [UIImage systemImageNamed:@"folder.fill"];
     cell.imageView.tintColor = [UIColor systemBlueColor];
     cell.selectionStyle = tableView.isEditing
@@ -1531,7 +1615,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   }
 
   NSString *cleanPatchHex = [self normalizeHex:rawPatchHex];
-  if (cleanPatchHex.length % 2 != 0) {
+  if (cleanPatchHex.length % 2 != 0 || [cleanPatchHex rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet]].location != NSNotFound) {
     [self showToast:TR(@"Hex_Err_Len_Title")];
     return;
   }
@@ -1539,14 +1623,12 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   if (byteLength == 0)
     return;
 
-  NSString *offsetStr =
-      [self.offsetField.text stringByReplacingOccurrencesOfString:@"0x"
-                                                       withString:@""];
-  uint64_t offset = strtoull([offsetStr UTF8String], NULL, 16);
+  uint64_t offset = 0;
+  if (![self readOffset:&offset]) { [self showToast:TR(@"Ptr_Error_Invalid_Target")]; return; }
   uint64_t absAddr = self.selectedModule.loadAddress + offset;
 
   NSString *detectedOrigHex = nil;
-  if (self.tempOriginalHex && self.tempOriginalHex.length > 0) {
+  if (self.tempOriginalHex.length > 0 && self.tempOriginalAddress == absAddr && self.tempOriginalLength == byteLength) {
     detectedOrigHex = self.tempOriginalHex;
   } else {
     if ([VMMemoryEngine shared].targetTask == MACH_PORT_NULL) {
@@ -1579,217 +1661,103 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   }
 
 
-  UIAlertController *alert =
-
-      [UIAlertController alertControllerWithTitle:TR(@"Title_Save_Patch")
-                                          message:nil
-                                   preferredStyle:UIAlertControllerStyleAlert];
-  NSString *defaultNote =
-      existingPatch
-          ? existingPatch.note
-          : [NSString stringWithFormat:@"%@ + 0x%llX", self.selectedModule.name,
-                                       offset];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = defaultNote;
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 60, 30)];
-    l.text = TR(@"Lock_Label_Note");
-    l.font = [UIFont systemFontOfSize:12];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.text = cleanPatchHex;
-    tf.placeholder = TR(@"RVA_Patch_Hex_Placeholder");
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 60, 30)];
-    l.text = TR(@"RVA_Modify_Label");
-    l.font = [UIFont systemFontOfSize:12];
-    l.textColor = [UIColor systemGreenColor];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.text = detectedOrigHex ?: @"";
-    tf.placeholder = TR(@"RVA_Original_Hex_Placeholder");
-    if (!detectedOrigHex)
-      tf.text = @"???";
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 60, 30)];
-    l.text = TR(@"RVA_Origin_Label");
-    l.font = [UIFont systemFontOfSize:12];
-    l.textColor = [UIColor systemRedColor];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-  
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.text = existingPatch ? existingPatch.author : @"";
-    tf.placeholder = TR(@"Placeholder_Author");
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 60, 30)];
-    l.text = TR(@"Lock_Label_Author");
-    l.font = [UIFont systemFontOfSize:12];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-
-  }];
-
-  [alert
-      addAction:
-          [UIAlertAction
-              actionWithTitle:TR(@"Btn_Confirm")
-                        style:UIAlertActionStyleDefault
-                      handler:^(UIAlertAction *a) {
-                        UITextField *tfNote = alert.textFields[0];
-                        UITextField *tfPatch = alert.textFields[1];
-                        UITextField *tfOrig = alert.textFields[2];
-                        UITextField *tfAuth = alert.textFields[3];
-
-                        NSString *note = (tfNote.text.length > 0)
-                                             ? tfNote.text
-                                             : tfNote.placeholder;
-                        NSString *finalPatchHex = tfPatch.text;
-                        NSString *finalOrigHex = tfOrig.text;
-                        NSString *author = (tfAuth.text.length > 0)
-                                               ? tfAuth.text
-                                               : tfAuth.placeholder;
-
-                        if (finalPatchHex.length == 0 ||
-                            finalOrigHex.length == 0)
-                          return;
-
-                        VMRVAPatch *targetPatch = existingPatch;
-
-                        if (!targetPatch) {
-                          for (VMRVAPatch *p in [VMMemoryEngine shared]
-                                   .rvaPatches) {
-                            BOOL bidMatch =
-                                (!p.bundleID ||
-                                 [p.bundleID isEqualToString:currentBid]);
-                            if (bidMatch &&
-                                [p.moduleName
-                                    isEqualToString:self.selectedModule.name] &&
-                                p.offset == offset) {
-                              targetPatch = p;
-                              break;
-                            }
-                          }
-                        }
-
-                        if (targetPatch) {
-                          VMRVAPatch *patch = [[VMRVAPatch alloc] init];
-                          patch.moduleName = self.selectedModule.name;
-                          patch.offset = offset;
-                          patch.patchHex = finalPatchHex;
-                          patch.originalHex = finalOrigHex;
-                          patch.note = note;
-                          patch.author = author;
-                          patch.isImported = targetPatch.isImported;
-                          patch.bundleID = currentBid;
-                          patch.isOn = targetPatch.isOn;
-                          patch.createdAt = targetPatch.createdAt;
-                          if (currentBid && currentBid.length > 0) {
+  NSString *moduleName = [self.selectedModule.name copy];
+  NSString *defaultNote = existingPatch.note.length > 0 ? existingPatch.note :
+      [NSString stringWithFormat:@"%@ + 0x%llX", moduleName, offset];
+  VMFormSheetViewController *form = [[VMFormSheetViewController alloc]
+      initWithTitle:TR(@"Title_Save_Patch") submitTitle:TR(@"Btn_Save")];
+  form.message = [NSString stringWithFormat:@"%@ + 0x%llX", moduleName, offset];
+  UITextField *noteField = [form addTextFieldWithLabel:TR(@"Lock_Label_Note") value:defaultNote placeholder:TR(@"Placeholder_Note") keyboardType:UIKeyboardTypeDefault];
+  UITextView *patchField = [form addTextViewWithLabel:TR(@"RVA_Modify_Label") value:cleanPatchHex placeholder:TR(@"RVA_Patch_Hex_Placeholder") height:88];
+  UITextView *originalField = [form addTextViewWithLabel:TR(@"RVA_Origin_Label") value:detectedOrigHex ?: @"" placeholder:TR(@"RVA_Original_Hex_Placeholder") height:88];
+  UITextField *authorField = [form addTextFieldWithLabel:TR(@"Label_Author") value:existingPatch.author ?: @"VansonMod" placeholder:TR(@"Placeholder_Author") keyboardType:UIKeyboardTypeDefault];
+  if (existingPatch.isImported) {
+    patchField.text = existingPatch.patchHex;
+    originalField.text = existingPatch.originalHex;
+    patchField.editable = NO;
+    originalField.editable = NO;
+    authorField.enabled = NO;
+  }
+  __weak VMPatcherViewController *weakSelf = self;
+  form.submitHandler = ^NSString *(VMFormSheetViewController *sheet) {
+    VMPatcherViewController *self = weakSelf;
+    if (!self) return TR(@"Alert_Error");
+    if (![[VMMemoryEngine shared].currentBundleID isEqualToString:currentBid]) return TR(@"Err_Not_Connected_Msg");
+    NSString *patchHex = [self normalizeHex:patchField.text];
+    NSString *originalHex = [self normalizeHex:originalField.text];
+    NSCharacterSet *invalidHex = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
+    if (!existingPatch.isImported && (patchHex.length == 0 || originalHex.length == 0 ||
+        [patchHex rangeOfCharacterFromSet:invalidHex].location != NSNotFound ||
+        [originalHex rangeOfCharacterFromSet:invalidHex].location != NSNotFound)) return TR(@"Patch_Hex_Err");
+    if (!existingPatch.isImported && (patchHex.length % 2 || originalHex.length != patchHex.length)) return TR(@"Hex_Err_Len_Title");
+    VMRVAPatch *patch = existingPatch ? [VMRVAPatch fromDictionary:[existingPatch toDictionary]] : nil;
+    patch.fileName = existingPatch.fileName;
+    if (!patch) {
+      patch = [VMRVAPatch new];
+      patch.moduleName = moduleName;
+      patch.offset = offset;
+      patch.bundleID = currentBid;
+      patch.createdAt = NSDate.date.timeIntervalSince1970;
+    }
+    patch.note = noteField.text.length ? noteField.text : defaultNote;
+    if (!patch.isImported) {
+      patch.patchHex = patchHex;
+      patch.originalHex = originalHex;
+      patch.author = authorField.text.length ? authorField.text : @"VansonMod";
+    }
+    if (currentBid.length > 0) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                            id proxy = [NSClassFromString(@"LSApplicationProxy")
-                                performSelector:
-                                    NSSelectorFromString(
-                                        @"applicationProxyForIdentifier:")
-                                     withObject:currentBid];
-                            if (proxy) {
-                              patch.appName =
-                                  [proxy performSelector:NSSelectorFromString(
-                                                             @"localizedName")];
-                              patch.appVersion = [proxy
-                                  performSelector:NSSelectorFromString(
-                                                      @"shortVersionString")];
-                            }
+      id proxy = [NSClassFromString(@"LSApplicationProxy") performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:currentBid];
+      if (proxy) {
+        patch.appName = [proxy performSelector:NSSelectorFromString(@"localizedName")];
+        patch.appVersion = [proxy performSelector:NSSelectorFromString(@"shortVersionString")];
+      }
 #pragma clang diagnostic pop
-                          }
-                          NSInteger index = [[VMMemoryEngine shared].rvaPatches
-                              indexOfObject:targetPatch];
-                          if (index != NSNotFound) {
-                            [[VMMemoryEngine shared].rvaPatches
-                                replaceObjectAtIndex:index
-                                          withObject:patch];
-                          } else {
-                            [[VMMemoryEngine shared].rvaPatches
-                                addObject:patch];
-                          }
-                        } else {
-                          VMRVAPatch *patch = [[VMRVAPatch alloc] init];
-                          patch.moduleName = self.selectedModule.name;
-                          patch.offset = offset;
-                          patch.patchHex = finalPatchHex;
-                          patch.originalHex = finalOrigHex;
-                          patch.isOn = NO;
-                          patch.note = note;
-                          patch.author = author;
-                          patch.isImported = NO;
-                          patch.bundleID = currentBid;
-                          patch.createdAt =
-                              [[NSDate date] timeIntervalSince1970] + 0.001;
-                          if (currentBid && currentBid.length > 0) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                            id proxy = [NSClassFromString(@"LSApplicationProxy")
-                                performSelector:
-                                    NSSelectorFromString(
-                                        @"applicationProxyForIdentifier:")
-                                     withObject:currentBid];
-                            if (proxy) {
-                              patch.appName =
-                                  [proxy performSelector:NSSelectorFromString(
-                                                             @"localizedName")];
-                              patch.appVersion = [proxy
-                                  performSelector:NSSelectorFromString(
-                                                      @"shortVersionString")];
-                            }
-#pragma clang diagnostic pop
-                          }
-                          [[VMMemoryEngine shared].rvaPatches addObject:patch];
-                        }
-
-                        [[VMMemoryEngine shared] saveRVAPatches];
-
-                        if (self.isShowingManager)
-                          [self reloadPatchData];
-
-                        UIAlertController *shareAlert = [UIAlertController
-                            alertControllerWithTitle:TR(@"Share_Title")
-                                             message:TR(@"Share_Msg")
-                                      preferredStyle:
-                                          UIAlertControllerStyleAlert];
-
-                        [shareAlert
-                            addAction:
-                                [UIAlertAction
-                                    actionWithTitle:TR(@"Btn_Go_RVA")
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction *action) {
-      UITabBarController *tabBar = self.tabBarController;
-      if (tabBar && tabBar.viewControllers.count > 3) {
-        tabBar.selectedIndex = 3;
-        UINavigationController *nav = (UINavigationController *)tabBar.selectedViewController;
+    }
+    if (!patch.fileName.length) patch.fileName = [NSString stringWithFormat:@"Rva-%@.vmrva", NSUUID.UUID.UUIDString];
+    NSString *appDir = [self rvaFolderPathForBundleID:currentBid create:YES];
+    NSString *filePath = [appDir stringByAppendingPathComponent:patch.fileName];
+    VMDataSession *session = [VMDataSession sessionWithData:@[patch] bundleID:currentBid dataType:@"rva"];
+    NSData *data = [session toJSONData];
+    NSError *error = nil;
+    if (!data || ![data writeToFile:filePath options:NSDataWritingAtomic error:&error]) return error.localizedDescription ?: TR(@"Alert_Error");
+    if (existingPatch) {
+      existingPatch.note = patch.note;
+      existingPatch.author = patch.author;
+      existingPatch.patchHex = patch.patchHex;
+      existingPatch.originalHex = patch.originalHex;
+      existingPatch.fileName = patch.fileName;
+      existingPatch.appName = patch.appName;
+      existingPatch.appVersion = patch.appVersion;
+    } else {
+      [[VMMemoryEngine shared].rvaPatches addObject:patch];
+    }
+    if (self.isShowingManager) [self reloadPatchData];
+    return nil;
+  };
+  form.didSubmit = ^{
+    VMPatcherViewController *self = weakSelf;
+    if (!self) return;
+    UIAlertController *share = [UIAlertController alertControllerWithTitle:TR(@"Share_Title") message:TR(@"Share_Msg") preferredStyle:UIAlertControllerStyleAlert];
+    [share addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Go_RVA") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+      for (UIViewController *controller in self.tabBarController.viewControllers) {
+        if (controller.tabBarItem.tag != 3 || ![controller isKindOfClass:UINavigationController.class]) continue;
+        self.tabBarController.selectedViewController = controller;
+        UINavigationController *nav = (UINavigationController *)controller;
         [nav popToRootViewControllerAnimated:NO];
-        if ([nav.topViewController isKindOfClass:NSClassFromString(@"VMLockListViewController")]) {
+        if ([nav.topViewController isKindOfClass:VMLockListViewController.class]) {
           id lockVC = nav.topViewController;
-          NSDictionary *pending = @{@"targetTab": @(3), @"bundleID": currentBid ?: @"", @"fileName": (tfNote.text.length > 0) ? tfNote.text : @"Patch", @"toast": TR(@"Msg_Saved")};
-          [lockVC setValue:pending forKey:@"pendingJumpInfo"];
+          [lockVC setValue:@{@"targetTab": @3, @"bundleID": currentBid ?: @"", @"fileName": noteField.text.length ? noteField.text : defaultNote, @"toast": TR(@"Msg_Saved")} forKey:@"pendingJumpInfo"];
           if ([lockVC respondsToSelector:@selector(processPendingJump)]) [lockVC performSelector:@selector(processPendingJump)];
         }
+        break;
       }
-                                            }]];
-
-  [shareAlert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
-                                                 style:UIAlertActionStyleCancel
-                                               handler:nil]];
-  [self presentViewController:shareAlert animated:YES completion:nil];
-}]];
-
-[alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
-                                          style:UIAlertActionStyleCancel
-                                        handler:nil]];
-[self presentViewController:alert animated:YES completion:nil];
+    }]];
+    [share addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:share animated:YES completion:nil];
+  };
+  [form presentFrom:self];
 }
 
 - (void)rvaSwitchChanged:(UISwitch *)sender {
@@ -1812,9 +1780,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (NSString *)normalizeHex:(NSString *)hex {
-  NSString *clean =
-      [[hex stringByReplacingOccurrencesOfString:@" "
-                                      withString:@""] uppercaseString];
+  NSString *clean = [[[hex componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
+      componentsJoinedByString:@""] uppercaseString];
   clean = [clean stringByReplacingOccurrencesOfString:@"0X" withString:@""];
   return clean;
 }
@@ -2166,117 +2133,48 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       return;
     VMRVAPatch *patch = self.filteredPatches[indexPath.row];
 
-    if (![self isConnectedToBundle:patch.bundleID]) {
-      if ([self tryReconnectForBundleID:patch.bundleID]) {
-        [[VMMemoryEngine shared] loadRemoteModules];
-        UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc]
-            initWithStyle:UIImpactFeedbackStyleLight];
-        [gen impactOccurred];
-        [self reloadPatchData];
-        [self showToast:TR(@"Msg_Attached")];
-      } else {
-        NSString *bid = patch.bundleID ?: TR(@"App_Unknown");
-        [self showToast:[NSString stringWithFormat:@"%@\n(%@)",
-                                                   TR(@"Err_Not_Connected_Msg"),
-                                                   bid]];
-        return;
+    VMFormSheetViewController *form = [[VMFormSheetViewController alloc] initWithTitle:TR(@"Title_Edit_RVA") submitTitle:TR(@"Btn_Save")];
+    form.message = [patch displayString];
+    UITextField *noteField = [form addTextFieldWithLabel:TR(@"Lock_Label_Note") value:patch.note placeholder:TR(@"Placeholder_Note") keyboardType:UIKeyboardTypeDefault];
+    UITextField *authorField = [form addTextFieldWithLabel:TR(@"Label_Author") value:patch.author placeholder:TR(@"Placeholder_Author") keyboardType:UIKeyboardTypeDefault];
+    UITextView *patchField = [form addTextViewWithLabel:TR(@"RVA_Modify_Label") value:patch.patchHex placeholder:TR(@"RVA_Patch_Hex_Placeholder") height:88];
+    UITextView *originalField = [form addTextViewWithLabel:TR(@"RVA_Origin_Label") value:patch.originalHex placeholder:TR(@"RVA_Original_Hex_Placeholder") height:88];
+    authorField.enabled = !patch.isImported;
+    patchField.editable = !patch.isImported;
+    originalField.editable = !patch.isImported;
+    __weak VMPatcherViewController *weakSelf = self;
+    form.submitHandler = ^NSString *(VMFormSheetViewController *sheet) {
+      VMPatcherViewController *self = weakSelf;
+      if (!self) return TR(@"Alert_Error");
+      VMRVAPatch *candidate = [VMRVAPatch fromDictionary:[patch toDictionary]];
+      candidate.fileName = patch.fileName;
+      candidate.note = noteField.text;
+      if (!patch.isImported) {
+        candidate.author = authorField.text;
+        candidate.patchHex = [self normalizeHex:patchField.text];
+        candidate.originalHex = [self normalizeHex:originalField.text];
+        NSCharacterSet *invalidHex = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
+        if (!candidate.patchHex.length || !candidate.originalHex.length ||
+            [candidate.patchHex rangeOfCharacterFromSet:invalidHex].location != NSNotFound ||
+            [candidate.originalHex rangeOfCharacterFromSet:invalidHex].location != NSNotFound) return TR(@"Patch_Hex_Err");
+        if (candidate.patchHex.length % 2 || candidate.originalHex.length != candidate.patchHex.length) return TR(@"Hex_Err_Len_Title");
       }
-    }
-
-    UIAlertController *alert = [UIAlertController
-        alertControllerWithTitle:TR(@"Title_Edit_RVA")
-                         message:nil
-                  preferredStyle:UIAlertControllerStyleAlert];
-
-    BOOL shouldMask = NO;
-
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-      if (patch.note) {
-        tf.text = patch.note;
-      } else {
-        tf.placeholder = TR(@"Placeholder_Note");
-      }
-
-    }];
-
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-      
-      tf.text = shouldMask ? @"[Hidden Location]" : [patch displayString];
-      tf.enabled = NO;
-      tf.textColor = [UIColor systemGrayColor];
-      tf.font = [UIFont fontWithName:@"Menlo" size:12];
-    }];
-
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-      tf.placeholder = TR(@"Placeholder_Author");
-      tf.text = patch.author;
-      if (patch.isImported) {
-        tf.enabled = NO;
-        tf.textColor = [UIColor systemGrayColor];
-        tf.text = [NSString
-            stringWithFormat:@"%@ (%@)", patch.author, TR(@"Status_Locked")];
-      }
-    }];
-
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-      tf.placeholder = @"Hex (e.g. E0031F2A)";
-      
-      tf.text = shouldMask ? @"********" : patch.patchHex;
-      tf.font = [UIFont fontWithName:@"Menlo" size:12];
-      if (patch.isImported || shouldMask) {
-        tf.enabled = NO;
-        tf.textColor = [UIColor systemGrayColor];
-      }
-    }];
-    [alert
-        addAction:
-            [UIAlertAction
-                actionWithTitle:TR(@"Btn_Confirm")
-                          style:UIAlertActionStyleDefault
-                        handler:^(UIAlertAction *a) {
-                          if (!patch.isImported) {
-                          }
-                          patch.note = alert.textFields[0].text;
-                          if (!patch.isImported) {
-                            NSString *authorText = alert.textFields[2].text;
-                            NSString *lockedSuffix = [NSString
-                                stringWithFormat:@" (%@)",
-                                                 TR(@"Status_Locked")];
-                            if ([authorText hasSuffix:lockedSuffix]) {
-                              authorText = [authorText
-                                  substringToIndex:authorText.length -
-                                                   lockedSuffix.length];
-                            }
-                            patch.author = authorText;
-                          }
-                          patch.patchHex = alert.textFields[3].text;
-
-                          if (patch.fileName && patch.fileName.length > 0) {
-                            NSString *appDir =
-                                [self rvaFolderPathForBundleID:patch.bundleID
-                                                        create:YES];
-                            NSString *filePath = [appDir
-                                stringByAppendingPathComponent:patch.fileName];
-
-                            VMDataSession *session =
-                                [VMDataSession sessionWithData:@[ patch ]
-                                                      bundleID:patch.bundleID
-                                                      dataType:@"rva"];
-                            [[session toJSONData] writeToFile:filePath
-                                                   atomically:YES];
-                          } else {
-                            [[VMMemoryEngine shared] saveRVAPatches];
-                          }
-
-                          [self.managerTableView
-                              reloadRowsAtIndexPaths:@[ indexPath ]
-                                    withRowAnimation:
-                                        UITableViewRowAnimationNone];
-                        }]];
-    [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
+      if (!candidate.fileName.length) candidate.fileName = [NSString stringWithFormat:@"Rva-%@.vmrva", NSUUID.UUID.UUIDString];
+      NSString *appDir = [self rvaFolderPathForBundleID:candidate.bundleID create:YES];
+      NSString *filePath = [appDir stringByAppendingPathComponent:candidate.fileName];
+      VMDataSession *session = [VMDataSession sessionWithData:@[candidate] bundleID:candidate.bundleID dataType:@"rva"];
+      NSData *data = [session toJSONData];
+      NSError *error = nil;
+      if (!data || ![data writeToFile:filePath options:NSDataWritingAtomic error:&error]) return error.localizedDescription ?: TR(@"Alert_Error");
+      patch.note = candidate.note;
+      patch.author = candidate.author;
+      patch.patchHex = candidate.patchHex;
+      patch.originalHex = candidate.originalHex;
+      patch.fileName = candidate.fileName;
+      [self.managerTableView reloadData];
+      return nil;
+    };
+    [form presentFrom:self];
   }
 }
 
@@ -2414,41 +2312,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 - (void)enterBatchMode {
   self.managerTableView.allowsMultipleSelectionDuringEditing = YES;
   [self.managerTableView setEditing:YES animated:YES];
-  UIBarButtonItem *selAllBtn =
-      [[UIBarButtonItem alloc] initWithTitle:TR(@"Batch_Sel_All")
-                                       style:UIBarButtonItemStylePlain
-                                      target:self
-                                      action:@selector(batchSelectAll)];
-  self.navigationItem.leftBarButtonItem = selAllBtn;
-  self.navigationItem.rightBarButtonItem =
-      [[UIBarButtonItem alloc] initWithTitle:TR(@"Btn_Cancel")
-                                       style:UIBarButtonItemStyleDone
-                                      target:self
-                                      action:@selector(exitBatchMode)];
-  UIView *titleView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 220, 44)];
-  UIButton *expBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-  [expBtn setImage:[UIImage systemImageNamed:@"square.and.arrow.up"]
-          forState:UIControlStateNormal];
-  expBtn.frame = CGRectMake(0, 2, 100, 40);
-  [expBtn setTitle:TR(@"Act_Export") forState:UIControlStateNormal];
-  expBtn.titleLabel.font = [UIFont systemFontOfSize:14];
-  [expBtn addTarget:self
-                action:@selector(performBatchShare)
-      forControlEvents:UIControlEventTouchUpInside];
-  [titleView addSubview:expBtn];
-  UIButton *delBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-  [delBtn setImage:[UIImage systemImageNamed:@"trash"]
-          forState:UIControlStateNormal];
-  delBtn.frame = CGRectMake(110, 2, 100, 40);
-  [delBtn setTitle:TR(@"Act_Delete") forState:UIControlStateNormal];
-  [delBtn setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
-  delBtn.tintColor = [UIColor systemRedColor];
-  delBtn.titleLabel.font = [UIFont systemFontOfSize:14];
-  [delBtn addTarget:self
-                action:@selector(batchDelete)
-      forControlEvents:UIControlEventTouchUpInside];
-  [titleView addSubview:delBtn];
-  self.navigationItem.titleView = titleView;
+  [self updateNavBarButtons];
 }
 
 - (void)exitBatchMode {
@@ -2685,20 +2549,21 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 - (void)resetState {
   dispatch_async(dispatch_get_main_queue(), ^{
+    ++self.moduleLoadGeneration;
     self.selectedModule = nil;
+    self.tempOriginalHex = nil;
+    self.tempOriginalAddress = 0;
+    self.tempOriginalLength = 0;
     self.moduleField.text = TR(@"RVA_Select_Hint");
-    self.moduleField.textColor = [UIColor systemOrangeColor];
-    self.moduleDetailLabel.text = @"Select a framework to see details";
+    self.moduleField.textColor = [UIColor secondaryLabelColor];
+    self.moduleDetailLabel.text = TR(@"RVA_Select_Hint");
+    self.moduleDetailLabel.hidden = YES;
     self.offsetField.text = @"";
     self.finalAddrLabel.text = @"---";
     self.hexField.text = @"";
     self.previewInstructionLabel.text = TR(@"RVA_Waiting_Input");
-    if ([VMMemoryEngine shared].targetTask != MACH_PORT_NULL) {
-      [self loadModules];
-    } else {
-      self.procNameLabel.text = @"No Process";
-      self.procDetailLabel.text = @"Base: - | Size: -";
-    }
+    self.procDetailLabel.text = @"Base: - | Size: -";
+    [self loadModules];
   });
 }
 
@@ -2708,44 +2573,6 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       [self reloadPatchData];
     }
   });
-}
-
-#pragma mark - Keyboard Handling
-
-- (void)keyboardWillShow:(NSNotification *)notification {
-  NSDictionary *info = [notification userInfo];
-  CGSize kbSize =
-      [[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue].size;
-
-  UIEdgeInsets contentInsets = UIEdgeInsetsMake(0.0, 0.0, kbSize.height, 0.0);
-  self.scrollView.contentInset = contentInsets;
-  self.scrollView.scrollIndicatorInsets = contentInsets;
-
-  if (self.activeField) {
-    
-    CGRect aRect = self.view.frame;
-    aRect.size.height -= kbSize.height;
-
-    CGRect fieldFrame = [self.activeField convertRect:self.activeField.bounds
-                                               toView:self.view];
-
-    if (!CGRectContainsPoint(
-            aRect, CGPointMake(fieldFrame.origin.x,
-                               fieldFrame.origin.y + fieldFrame.size.height))) {
-      [self.scrollView scrollRectToVisible:fieldFrame animated:YES];
-    }
-  }
-}
-
-- (void)keyboardWillHide:(NSNotification *)notification {
-  
-  UIEdgeInsets contentInsets = UIEdgeInsetsZero;
-
-  [UIView animateWithDuration:0.3
-                   animations:^{
-                     self.scrollView.contentInset = contentInsets;
-                     self.scrollView.scrollIndicatorInsets = contentInsets;
-                   }];
 }
 
 @end

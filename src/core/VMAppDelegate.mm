@@ -56,23 +56,10 @@
     }
   }
 
+  [VMUIHelper installAppearance];
+  self.window.tintColor = VMUIHelper.accentColor;
   self.window.rootViewController = [[VMRootViewController alloc] init];
   [self.window makeKeyAndVisible];
-
-  if (@available(iOS 15.0, *)) {
-    UINavigationBarAppearance *appearance =
-        [[UINavigationBarAppearance alloc] init];
-    [appearance configureWithDefaultBackground];
-
-    [UINavigationBar appearance].standardAppearance = appearance;
-    [UINavigationBar appearance].scrollEdgeAppearance = appearance;
-    [UINavigationBar appearance].compactAppearance = appearance;
-
-    UITabBarAppearance *tabAppearance = [[UITabBarAppearance alloc] init];
-    [tabAppearance configureWithDefaultBackground];
-    [UITabBar appearance].standardAppearance = tabAppearance;
-    [UITabBar appearance].scrollEdgeAppearance = tabAppearance;
-  }
 
   [self startKeepAlive];
 

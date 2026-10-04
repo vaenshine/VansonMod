@@ -8,10 +8,27 @@
 @property (nonatomic, strong) NSMutableArray<NSString *> *backupFolders;
 @end
 @implementation VMGlobalBackupViewController
+- (instancetype)init {
+    return [super initWithStyle:UITableViewStyleInsetGrouped];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    [VMUIHelper sizeHeaderToFitTableView:self.tableView];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self loadBackupFolders];
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = TR(@"Backups_Global_Title");
 
+    [VMUIHelper styleTableView:self.tableView];
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 88;
     self.navigationItem.rightBarButtonItem = nil;
 
     [VMUIHelper addFixedFooterTo:self forTableView:self.tableView];
@@ -25,10 +42,7 @@
     
     NSError *err;
     NSArray *contents = [fm contentsOfDirectoryAtPath:rootPath error:&err];
-    if (!contents) {
-        self.backupFolders = [NSMutableArray array];
-        return;
-    }
+    if (!contents) contents = @[];
     
     NSMutableArray *dirs = [NSMutableArray array];
     for (NSString *name in contents) {
@@ -45,15 +59,9 @@
     self.backupFolders = dirs;
     [self.tableView reloadData];
     
-    if (self.backupFolders.count == 0) {
-        UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width, 50)];
-        lbl.text = TR(@"Backups_Empty");
-        lbl.textAlignment = NSTextAlignmentCenter;
-        lbl.textColor = [UIColor systemGrayColor];
-        self.tableView.tableFooterView = lbl;
-    } else {
-        self.tableView.tableFooterView = nil;
-    }
+    self.tableView.backgroundView = self.backupFolders.count ? nil :
+        [VMUIHelper emptyStateWithTitle:TR(@"Backups_Global_Title") message:TR(@"Backups_Empty") symbol:@"externaldrive"];
+
 }
 
 - (NSString *)formatAppInfoForFolder:(NSString *)folderName {
@@ -90,11 +98,12 @@
     }
     
     NSString *folderName = self.backupFolders[indexPath.row];
-    cell.textLabel.numberOfLines = 2;
+    cell.textLabel.numberOfLines = 0;
+    cell.textLabel.adjustsFontForContentSizeCategory = YES;
     cell.textLabel.text = [self formatAppInfoForFolder:folderName];
-    cell.textLabel.font = [UIFont systemFontOfSize:14];
+    cell.textLabel.font = [VMUIHelper scaledFontOfSize:15 weight:UIFontWeightMedium];
     cell.imageView.image = [UIImage systemImageNamed:@"folder"];
-    cell.imageView.tintColor = [UIColor systemGrayColor];
+    cell.imageView.tintColor = [VMUIHelper accentColor];
     
     NSString *path = [[[VMBackupManager shared] myBackupFolder] stringByAppendingPathComponent:folderName];
     NSArray *subs = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:path error:nil];
@@ -123,14 +132,23 @@
 }
 
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (editingStyle == UITableViewCellEditingStyleDelete) {
-        NSString *appName = self.backupFolders[indexPath.row];
-        NSString *path = [[[VMBackupManager shared] myBackupFolder] stringByAppendingPathComponent:appName];
-        
-        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
-        [self.backupFolders removeObjectAtIndex:indexPath.row];
-        [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
-    }
+    if (editingStyle != UITableViewCellEditingStyleDelete || indexPath.row >= self.backupFolders.count) return;
+    NSString *folder = self.backupFolders[indexPath.row];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Act_Delete")
+        message:[self formatAppInfoForFolder:folder] preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:TR(@"Act_Delete") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        NSString *path = [[[VMBackupManager shared] myBackupFolder] stringByAppendingPathComponent:folder];
+        NSError *error = nil;
+        if (![[NSFileManager defaultManager] removeItemAtPath:path error:&error]) {
+            UIAlertController *failure = [UIAlertController alertControllerWithTitle:TR(@"Alert_Fail")
+                message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+            [failure addAction:[UIAlertAction actionWithTitle:TR(@"Btn_OK") style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:failure animated:YES completion:nil];
+        }
+        [self loadBackupFolders];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 @end

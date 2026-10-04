@@ -1,4 +1,5 @@
 #import "VMScriptViewController.h"
+#import "../common/VMFormSheetViewController.h"
 #import "../../utils/helpers/VMUIHelper.h"
 #import "../../utils/managers/VMScriptManager.h"
 #import "VMScriptToolsViewController.h"
@@ -22,6 +23,17 @@
 @property(nonatomic, strong) UIButton *btnRun;
 
 @property(nonatomic, strong) UIButton *btnSave;
+@property(nonatomic, strong) UIButton *btnUndo;
+@property(nonatomic, strong) NSLayoutConstraint *navigationTitleWidthConstraint;
+@property(nonatomic, strong) UIStackView *contentStack;
+@property(nonatomic, strong) UIStackView *commandStack;
+@property(nonatomic, strong) NSLayoutConstraint *contentBottomConstraint;
+@property(nonatomic, copy) NSString *savedEditorText;
+@property(nonatomic, strong) NSError *lastSaveError;
+@property(nonatomic, strong) UIBarButtonItem *draftBackButton;
+@property(nonatomic, weak) UIGestureRecognizer *protectedPopGesture;
+@property(nonatomic, assign) BOOL savedPopGestureEnabled;
+@property(nonatomic, assign) BOOL hasSavedPopGestureState;
 @end
 
 @implementation VMScriptViewController
@@ -37,6 +49,7 @@
   self.navigationItem.rightBarButtonItem = nil;
 
   self.editorView.text = self.scriptModel.scriptContent;
+  self.savedEditorText = self.editorView.text ?: @"";
 
   if (self.scriptModel.isImported) {
     self.editorView.editable = NO;
@@ -51,15 +64,10 @@
 
   [self updateHeaderInfo];
 
-  UITapGestureRecognizer *tap =
-      [[UITapGestureRecognizer alloc] initWithTarget:self.view
-                                              action:@selector(endEditing:)];
-  [self.view addGestureRecognizer:tap];
-
   [[NSNotificationCenter defaultCenter]
       addObserver:self
          selector:@selector(keyboardWillShow:)
-             name:UIKeyboardWillShowNotification
+             name:UIKeyboardWillChangeFrameNotification
            object:nil];
   [[NSNotificationCenter defaultCenter]
       addObserver:self
@@ -69,9 +77,84 @@
 }
 
 - (void)updateHeaderInfo {
-  self.infoLabel.text = [NSString
+  NSString *info = [NSString
       stringWithFormat:@"%@ %@ | %@", TR(@"Script_Info_Author"),
                        self.scriptModel.author, self.scriptModel.desc ?: @""];
+  self.infoLabel.text = [self hasUnsavedChanges]
+      ? [NSString stringWithFormat:@"%@ · %@", TR(@"Str_Unsaved"), info]
+      : info;
+  self.btnUndo.enabled = !self.scriptModel.isImported && self.editorView.undoManager.canUndo;
+  [self updateDraftNavigationProtection];
+}
+
+- (BOOL)hasUnsavedChanges {
+  return !self.scriptModel.isImported && ![(self.editorView.text ?: @"")
+      isEqualToString:(self.savedEditorText ?: @"")];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+  [super viewWillAppear:animated];
+  UIGestureRecognizer *gesture = self.navigationController.interactivePopGestureRecognizer;
+  if (!self.hasSavedPopGestureState && gesture) {
+    self.protectedPopGesture = gesture;
+    self.savedPopGestureEnabled = gesture.enabled;
+    self.hasSavedPopGestureState = YES;
+  }
+  [self updateDraftNavigationProtection];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+  [super viewWillDisappear:animated];
+  [self restorePopGestureState];
+}
+
+- (void)restorePopGestureState {
+  if (self.hasSavedPopGestureState) {
+    self.protectedPopGesture.enabled = self.savedPopGestureEnabled;
+    self.hasSavedPopGestureState = NO;
+    self.protectedPopGesture = nil;
+  }
+}
+
+- (void)updateDraftNavigationProtection {
+  BOOL dirty = [self hasUnsavedChanges];
+  if (dirty && !self.draftBackButton) {
+    self.draftBackButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"chevron.backward"]
+        style:UIBarButtonItemStylePlain target:self action:@selector(requestClose)];
+    self.draftBackButton.accessibilityLabel = TR(@"Btn_Cancel");
+  }
+  self.navigationItem.leftBarButtonItem = dirty ? self.draftBackButton : nil;
+  if (self.hasSavedPopGestureState) {
+    self.protectedPopGesture.enabled = self.savedPopGestureEnabled && !dirty;
+  }
+}
+
+- (void)leaveEditor {
+  [self.view endEditing:YES];
+  if (self.navigationController.topViewController == self && self.navigationController.viewControllers.count > 1) {
+    [self.navigationController popViewControllerAnimated:YES];
+  } else if (self.presentingViewController || self.navigationController.presentingViewController) {
+    [self dismissViewControllerAnimated:YES completion:nil];
+  }
+}
+
+- (void)requestClose {
+  if (![self hasUnsavedChanges]) { [self leaveEditor]; return; }
+  [self.view endEditing:YES];
+  if (self.presentedViewController) return;
+  UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Str_Unsaved")
+      message:nil preferredStyle:UIAlertControllerStyleAlert];
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Str_Discard") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [alert dismissViewControllerAnimated:YES completion:^{ [self leaveEditor]; }];
+  }]];
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Save") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert dismissViewControllerAnimated:YES completion:^{
+      if ([self saveScriptModelToDisk]) [self leaveEditor];
+      else [self showSaveError];
+    }];
+  }]];
+  [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)editNoteAction {
@@ -80,63 +163,40 @@
     return;
   }
 
-  UIAlertController *alert =
-      [UIAlertController alertControllerWithTitle:TR(@"Title_Edit_Script_Info")
-                                          message:nil
-                                   preferredStyle:UIAlertControllerStyleAlert];
-
-  [alert
-      addTextFieldWithConfigurationHandler:^(UITextField *_Nonnull textField) {
-        textField.text = self.scriptModel.note;
-        textField.placeholder = TR(@"Script_Name_Placeholder");
-      }];
-
-  [alert
-      addTextFieldWithConfigurationHandler:^(UITextField *_Nonnull textField) {
-        textField.text = self.scriptModel.desc;
-        textField.placeholder = TR(@"Script_Desc_Placeholder");
-      }];
-
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
-                                            style:UIAlertActionStyleCancel
-                                          handler:nil]];
-  [alert
-      addAction:[UIAlertAction
-                    actionWithTitle:TR(@"Btn_Confirm")
-                              style:UIAlertActionStyleDefault
-                            handler:^(UIAlertAction *_Nonnull action) {
-                              NSString *newNote = alert.textFields[0].text;
-                              NSString *newDesc = alert.textFields[1].text;
-
-                              if (newNote && newNote.length > 0) {
-                                self.scriptModel.note = newNote;
-                                [self updateNavigationTitle:newNote];
-                              }
-
-                              if (newDesc) { 
-                                self.scriptModel.desc =
-                                    (newDesc.length > 0)
-                                        ? newDesc
-                                        : TR(@"Script_Default_Desc");
-                              }
-
-                              [self updateHeaderInfo];
-
-                              if ([self saveScriptModelToDisk]) {
-                                
-                              }
-                            }]];
-
-  [self presentViewController:alert animated:YES completion:nil];
+  VMFormSheetViewController *form = [[VMFormSheetViewController alloc] initWithTitle:TR(@"Title_Edit_Script_Info") submitTitle:TR(@"Btn_Save")];
+  UITextField *name = [form addTextFieldWithLabel:TR(@"Script_Name_Label") value:self.scriptModel.note placeholder:TR(@"Script_Name_Placeholder") keyboardType:UIKeyboardTypeDefault];
+  UITextView *description = [form addTextViewWithLabel:TR(@"Script_Desc_Label") value:self.scriptModel.desc placeholder:TR(@"Script_Desc_Placeholder") height:100];
+  __weak __typeof(self) weakSelf = self;
+  form.submitHandler = ^NSString *(VMFormSheetViewController *editor) {
+    __typeof(self) strongSelf = weakSelf;
+    if (!strongSelf) return TR(@"Err_Write_Permission");
+    VMScriptModel *candidate = [strongSelf scriptModelForSaving];
+    if (name.text.length) candidate.note = name.text;
+    candidate.desc = description.text.length ? description.text : TR(@"Script_Default_Desc");
+    if (![strongSelf writeScriptModelToDisk:candidate])
+      return strongSelf.lastSaveError.localizedDescription ?: TR(@"Err_Write_Permission");
+    strongSelf.scriptModel.note = candidate.note;
+    strongSelf.scriptModel.desc = candidate.desc;
+    strongSelf.scriptModel.bundleID = candidate.bundleID;
+    return nil;
+  };
+  form.didSubmit = ^{
+    [weakSelf updateNavigationTitle:weakSelf.scriptModel.note ?: TR(@"Script_Title_Default")];
+    [weakSelf updateHeaderInfo];
+  };
+  [form presentFrom:self];
 }
 
 - (void)dealloc {
+  [self restorePopGestureState];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)undoEditor {
+  if (self.scriptModel.isImported) return;
   if ([self.editorView.undoManager canUndo]) {
     [self.editorView.undoManager undo];
+    [self textViewDidChange:self.editorView];
   }
 }
 
@@ -156,180 +216,162 @@
   [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm")
                                             style:UIAlertActionStyleDestructive
                                           handler:^(UIAlertAction *action) {
-                                            self.editorView.text = @"";
+                                            [self clearEditorContents];
                                           }]];
 
   [self presentViewController:alert animated:YES completion:nil];
 }
 
+- (void)clearEditorContents {
+  if (self.scriptModel.isImported || self.editorView.text.length == 0) return;
+  self.editorView.selectedRange = NSMakeRange(0, self.editorView.text.length);
+  [self.editorView insertText:@""];
+  [self textViewDidChange:self.editorView];
+}
+
 - (void)setupUI {
+  self.view.backgroundColor = [VMUIHelper canvasColor];
+  self.hidesBottomBarWhenPushed = YES;
   UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+  self.contentStack = [[UIStackView alloc] init];
+  self.contentStack.axis = UILayoutConstraintAxisVertical;
+  self.contentStack.spacing = 12;
+  self.contentStack.translatesAutoresizingMaskIntoConstraints = NO;
+  [self.view addSubview:self.contentStack];
+  self.contentBottomConstraint = [self.contentStack.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-16];
+  [NSLayoutConstraint activateConstraints:@[
+    [self.contentStack.topAnchor constraintEqualToAnchor:g.topAnchor constant:12],
+    [self.contentStack.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:16],
+    [self.contentStack.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-16],
+    self.contentBottomConstraint
+  ]];
 
-  self.headerView = [[UIView alloc] init];
-  self.headerView.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.view addSubview:self.headerView];
+  self.headerView = [UIView new];
+  self.infoLabel = [UILabel new];
+  self.infoLabel.font = [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightRegular];
+  self.infoLabel.adjustsFontForContentSizeCategory = YES;
+  self.infoLabel.textColor = UIColor.secondaryLabelColor;
+  self.infoLabel.numberOfLines = 2;
+  UIButton *undo = [UIButton buttonWithType:UIButtonTypeSystem];
+  self.btnUndo = undo;
+  undo.enabled = NO;
+  [undo setImage:[UIImage systemImageNamed:@"arrow.uturn.backward"] forState:UIControlStateNormal];
+  undo.accessibilityLabel = TR(@"Undo_Last_Modify");
+  [undo addTarget:self action:@selector(undoEditor) forControlEvents:UIControlEventTouchUpInside];
+  UIButton *clear = [UIButton buttonWithType:UIButtonTypeSystem];
+  [clear setImage:[UIImage systemImageNamed:@"trash"] forState:UIControlStateNormal];
+  clear.tintColor = UIColor.systemRedColor;
+  clear.accessibilityLabel = TR(@"Timeline_Clear");
+  clear.enabled = !self.scriptModel.isImported;
+  [clear addTarget:self action:@selector(clearEditor) forControlEvents:UIControlEventTouchUpInside];
+  UIStackView *metadata = [[UIStackView alloc] initWithArrangedSubviews:@[self.infoLabel, undo, clear]];
+  metadata.spacing = 8;
+  metadata.alignment = UIStackViewAlignmentCenter;
+  metadata.translatesAutoresizingMaskIntoConstraints = NO;
+  [self.headerView addSubview:metadata];
+  [NSLayoutConstraint activateConstraints:@[
+    [metadata.topAnchor constraintEqualToAnchor:self.headerView.topAnchor],
+    [metadata.bottomAnchor constraintEqualToAnchor:self.headerView.bottomAnchor],
+    [metadata.leadingAnchor constraintEqualToAnchor:self.headerView.leadingAnchor],
+    [metadata.trailingAnchor constraintEqualToAnchor:self.headerView.trailingAnchor],
+    [undo.widthAnchor constraintEqualToConstant:44],
+    [clear.widthAnchor constraintEqualToConstant:44]
+  ]];
+  for (UIButton *control in @[undo, clear]) {
+    NSLayoutConstraint *height = [control.heightAnchor constraintEqualToConstant:44];
+    height.priority = 999;
+    height.active = YES;
+  }
+  [self.contentStack addArrangedSubview:self.headerView];
 
-  self.infoLabel = [[UILabel alloc] init];
-  self.infoLabel.font = [UIFont systemFontOfSize:12];
-  self.infoLabel.textColor = [UIColor secondaryLabelColor];
-  self.infoLabel.text = [NSString
-      stringWithFormat:@"%@ %@ | %@ %@", TR(@"Script_Info_Author"),
-                       self.scriptModel.author, TR(@"Script_Info_Bundle"),
-                       self.scriptModel.bundleID];
-  self.infoLabel.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerView addSubview:self.infoLabel];
-
-  UIButton *btnUndo = [UIButton buttonWithType:UIButtonTypeSystem];
-  [btnUndo setImage:[UIImage systemImageNamed:@"arrow.uturn.backward"]
-           forState:UIControlStateNormal];
-  [btnUndo setTintColor:[UIColor labelColor]];
-  [btnUndo addTarget:self
-                action:@selector(undoEditor)
-      forControlEvents:UIControlEventTouchUpInside];
-  btnUndo.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerView addSubview:btnUndo];
-
-  UIButton *btnClear = [UIButton buttonWithType:UIButtonTypeSystem];
-  [btnClear setImage:[UIImage systemImageNamed:@"trash"]
-            forState:UIControlStateNormal];
-  [btnClear setTintColor:[UIColor systemRedColor]];
-  [btnClear addTarget:self
-                action:@selector(clearEditor)
-      forControlEvents:UIControlEventTouchUpInside];
-  btnClear.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerView addSubview:btnClear];
-
-  self.editorView = [[UITextView alloc] init];
-  self.editorView.backgroundColor =
-      [UIColor secondarySystemGroupedBackgroundColor];
-  self.editorView.font = [UIFont fontWithName:@"Menlo" size:12];
-  self.editorView.layer.cornerRadius = 8;
-  self.editorView.translatesAutoresizingMaskIntoConstraints = NO;
+  self.editorView = [UITextView new];
+  self.editorView.showsHorizontalScrollIndicator = NO;
+  [VMUIHelper styleCard:self.editorView];
+  self.editorView.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody]
+      scaledFontForFont:[UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular]];
+  self.editorView.adjustsFontForContentSizeCategory = YES;
+  self.editorView.textContainerInset = UIEdgeInsetsMake(16, 12, 16, 12);
   self.editorView.autocapitalizationType = UITextAutocapitalizationTypeNone;
   self.editorView.autocorrectionType = UITextAutocorrectionTypeNo;
+  self.editorView.smartQuotesType = UITextSmartQuotesTypeNo;
+  self.editorView.smartDashesType = UITextSmartDashesTypeNo;
+  self.editorView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
+  self.editorView.accessibilityLabel = TR(@"Script_Btn_EditCode");
   self.editorView.delegate = self;
-  [self.view addSubview:self.editorView];
+  [self.editorView setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
+  [self.contentStack addArrangedSubview:self.editorView];
+  NSLayoutConstraint *editorMinimum = [self.editorView.heightAnchor constraintGreaterThanOrEqualToConstant:80];
+  editorMinimum.priority = UILayoutPriorityDefaultHigh;
+  editorMinimum.active = YES;
+  UIToolbar *keyboardTools = [UIToolbar new];
+  [keyboardTools sizeToFit];
+  keyboardTools.items = @[
+    [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil],
+    [[UIBarButtonItem alloc] initWithTitle:TR(@"Common_Done") style:UIBarButtonItemStyleDone target:self action:@selector(dismissKeyboard)]
+  ];
+  [VMUIHelper styleConfirmationItem:keyboardTools.items.lastObject];
+  self.editorView.inputAccessoryView = keyboardTools;
 
-  UIStackView *toolStack = [[UIStackView alloc] init];
-  toolStack.axis = UILayoutConstraintAxisHorizontal;
-  toolStack.distribution = UIStackViewDistributionFillEqually;
-  toolStack.spacing = 15;
-  toolStack.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.view addSubview:toolStack];
-
-  UIButton *btnShort = [UIButton buttonWithType:UIButtonTypeSystem];
-  [btnShort setTitle:TR(@"Script_Btn_Shortcut") forState:UIControlStateNormal];
-  [btnShort setBackgroundColor:[UIColor tertiarySystemGroupedBackgroundColor]];
-  btnShort.layer.cornerRadius = 8;
-  [btnShort addTarget:self
-                action:@selector(onShortcutAction)
-      forControlEvents:UIControlEventTouchUpInside];
-
-  UIButton *btnEx = [UIButton buttonWithType:UIButtonTypeSystem];
-  [btnEx setTitle:TR(@"Script_Btn_Template") forState:UIControlStateNormal];
-  [btnEx setBackgroundColor:[UIColor tertiarySystemGroupedBackgroundColor]];
-  btnEx.layer.cornerRadius = 8;
-  [btnEx addTarget:self
-                action:@selector(onExampleAction)
-      forControlEvents:UIControlEventTouchUpInside];
+  UIButton *shortcut = [UIButton buttonWithType:UIButtonTypeSystem];
+  [shortcut setTitle:TR(@"Script_Btn_Shortcut") forState:UIControlStateNormal];
+  [shortcut addTarget:self action:@selector(onShortcutAction) forControlEvents:UIControlEventTouchUpInside];
+  UIButton *examples = [UIButton buttonWithType:UIButtonTypeSystem];
+  [examples setTitle:TR(@"Script_Btn_Template") forState:UIControlStateNormal];
+  [examples addTarget:self action:@selector(onExampleAction) forControlEvents:UIControlEventTouchUpInside];
+  self.commandStack = [[UIStackView alloc] initWithArrangedSubviews:@[shortcut, examples]];
+  self.commandStack.spacing = 12;
+  self.commandStack.distribution = UIStackViewDistributionFillEqually;
+  shortcut.tintColor = [VMUIHelper accentColor];
+  [VMUIHelper styleButton:shortcut primary:NO];
+  examples.tintColor = [VMUIHelper accentColor];
+  [VMUIHelper styleButton:examples primary:NO];
+  [self.contentStack addArrangedSubview:self.commandStack];
 
   self.btnRun = [UIButton buttonWithType:UIButtonTypeSystem];
   [self.btnRun setTitle:TR(@"Script_Btn_Run") forState:UIControlStateNormal];
-  [self.btnRun setTitleColor:[UIColor systemBlueColor]
-                    forState:UIControlStateNormal];
-  [self.btnRun
-      setBackgroundColor:[UIColor tertiarySystemGroupedBackgroundColor]];
-  self.btnRun.layer.cornerRadius = 8;
-  [self.btnRun addTarget:self
-                  action:@selector(runScript)
-        forControlEvents:UIControlEventTouchUpInside];
-
+  self.btnRun.tintColor = [VMUIHelper accentColor];
+  [VMUIHelper styleButton:self.btnRun primary:YES];
+  [self.btnRun addTarget:self action:@selector(runScript) forControlEvents:UIControlEventTouchUpInside];
   self.btnSave = [UIButton buttonWithType:UIButtonTypeSystem];
   [self.btnSave setTitle:TR(@"Script_Btn_Save") forState:UIControlStateNormal];
-  [self.btnSave setTitleColor:[UIColor systemGreenColor]
-                     forState:UIControlStateNormal];
-  [self.btnSave
-      setBackgroundColor:[UIColor tertiarySystemGroupedBackgroundColor]];
-  self.btnSave.layer.cornerRadius = 8;
-  [self.btnSave addTarget:self
-                   action:@selector(saveScript)
-         forControlEvents:UIControlEventTouchUpInside];
+  self.btnSave.tintColor = [VMUIHelper accentColor];
+  [VMUIHelper styleButton:self.btnSave primary:NO];
+  [self.btnSave addTarget:self action:@selector(saveScript) forControlEvents:UIControlEventTouchUpInside];
+  UIStackView *actions = [[UIStackView alloc] initWithArrangedSubviews:@[self.btnRun, self.btnSave]];
+  actions.spacing = 12;
+  actions.distribution = UIStackViewDistributionFillEqually;
+  [self.contentStack addArrangedSubview:actions];
 
-  [toolStack addArrangedSubview:btnShort];
-  [toolStack addArrangedSubview:btnEx];
-  [toolStack addArrangedSubview:self.btnRun];
-  [toolStack addArrangedSubview:self.btnSave];
-
-  self.consoleView = [[UITextView alloc] init];
-  self.consoleView.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
-  self.consoleView.textColor = [UIColor systemGreenColor];
-  self.consoleView.font = [UIFont fontWithName:@"Menlo" size:11];
+  self.consoleView = [UITextView new];
+  self.consoleView.showsHorizontalScrollIndicator = NO;
+  [VMUIHelper styleCard:self.consoleView];
+  self.consoleView.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleFootnote]
+      scaledFontForFont:[UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular]];
+  self.consoleView.adjustsFontForContentSizeCategory = YES;
+  self.consoleView.textColor = UIColor.secondaryLabelColor;
+  self.consoleView.textContainerInset = UIEdgeInsetsMake(12, 12, 12, 12);
   self.consoleView.editable = NO;
-  self.consoleView.layer.cornerRadius = 8;
-  self.consoleView.translatesAutoresizingMaskIntoConstraints = NO;
-  self.consoleView.text =
-      [NSString stringWithFormat:@"> %@", TR(@"Script_Console_Ready")];
-  [self.view addSubview:self.consoleView];
+  self.consoleView.accessibilityLabel = TR(@"Script_Console_Ready");
+  self.consoleView.text = [NSString stringWithFormat:@"> %@", TR(@"Script_Console_Ready")];
+  [self.contentStack addArrangedSubview:self.consoleView];
+  NSLayoutConstraint *consoleHeight = [self.consoleView.heightAnchor constraintEqualToAnchor:g.heightAnchor multiplier:0.22];
+  consoleHeight.priority = UILayoutPriorityDefaultHigh;
+  consoleHeight.active = YES;
+}
 
-  [NSLayoutConstraint activateConstraints:@[
-    
-    [self.headerView.topAnchor constraintEqualToAnchor:g.topAnchor constant:12],
-    [self.headerView.leadingAnchor constraintEqualToAnchor:g.leadingAnchor
-                                                  constant:12],
-    [self.headerView.trailingAnchor constraintEqualToAnchor:g.trailingAnchor
-                                                   constant:-12],
-    [self.headerView.heightAnchor constraintEqualToConstant:30],
+- (void)dismissKeyboard {
+  [self.view endEditing:YES];
+}
 
-    [self.infoLabel.centerYAnchor
-        constraintEqualToAnchor:self.headerView.centerYAnchor],
-    [self.infoLabel.leadingAnchor
-        constraintEqualToAnchor:self.headerView.leadingAnchor],
-    
-    [self.infoLabel.trailingAnchor
-        constraintLessThanOrEqualToAnchor:btnUndo.leadingAnchor
-                                 constant:-10],
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  // Keep the editable title inside the space left by the native back button.
+  self.navigationTitleWidthConstraint.constant = MAX(80, MIN(260, self.view.bounds.size.width - 144));
+}
 
-    [btnClear.centerYAnchor
-        constraintEqualToAnchor:self.headerView.centerYAnchor],
-    [btnClear.trailingAnchor
-        constraintEqualToAnchor:self.headerView.trailingAnchor],
-    [btnClear.widthAnchor constraintEqualToConstant:30],
-    [btnClear.heightAnchor constraintEqualToConstant:30],
-
-    [btnUndo.centerYAnchor
-        constraintEqualToAnchor:self.headerView.centerYAnchor],
-    [btnUndo.trailingAnchor constraintEqualToAnchor:btnClear.leadingAnchor
-                                           constant:-8],
-    [btnUndo.widthAnchor constraintEqualToConstant:30],
-    [btnUndo.heightAnchor constraintEqualToConstant:30],
-
-    [self.editorView.topAnchor
-        constraintEqualToAnchor:self.headerView.bottomAnchor
-                       constant:4],
-    [self.editorView.leadingAnchor constraintEqualToAnchor:g.leadingAnchor
-                                                  constant:12],
-    [self.editorView.trailingAnchor constraintEqualToAnchor:g.trailingAnchor
-                                                   constant:-12],
-    [self.editorView.heightAnchor constraintEqualToAnchor:g.heightAnchor
-                                               multiplier:0.45],
-
-    [toolStack.topAnchor constraintEqualToAnchor:self.editorView.bottomAnchor
-                                        constant:8],
-    [toolStack.leadingAnchor constraintEqualToAnchor:g.leadingAnchor
-                                            constant:12],
-    [toolStack.trailingAnchor constraintEqualToAnchor:g.trailingAnchor
-                                             constant:-12],
-    [toolStack.heightAnchor constraintEqualToConstant:40],
-
-    [self.consoleView.topAnchor constraintEqualToAnchor:toolStack.bottomAnchor
-                                               constant:8],
-    [self.consoleView.leadingAnchor constraintEqualToAnchor:g.leadingAnchor
-                                                   constant:12],
-    [self.consoleView.trailingAnchor constraintEqualToAnchor:g.trailingAnchor
-                                                    constant:-12],
-    [self.consoleView.bottomAnchor constraintEqualToAnchor:g.bottomAnchor
-                                                  constant:-12],
-  ]];
+- (void)textViewDidChange:(UITextView *)textView {
+  if (textView != self.editorView) return;
+  [self updateHeaderInfo];
 }
 
 - (void)onShortcutAction {
@@ -389,7 +431,7 @@
     return;
 
   self.btnRun.enabled = NO;
-  self.btnRun.alpha = 0.5;
+  self.btnRun.alpha = 1.0;
   self.consoleView.text =
       [NSString stringWithFormat:@"> %@\n", TR(@"Script_Console_Running")];
 
@@ -407,44 +449,79 @@
 }
 
 - (void)saveScript {
-  
   if (self.scriptModel.isImported) return;
-
-  self.scriptModel.scriptContent = self.editorView.text;
-
   if ([self saveScriptModelToDisk]) {
     [self showToast:TR(@"Msg_Save_Success")];
+  } else {
+    [self showSaveError];
   }
 }
 
 - (BOOL)saveScriptModelToDisk {
+  if (self.scriptModel.isImported) return NO;
+  VMScriptModel *candidate = [self scriptModelForSaving];
+  candidate.scriptContent = self.editorView.text ?: @"";
+  if (![self writeScriptModelToDisk:candidate]) return NO;
+  self.scriptModel.scriptContent = candidate.scriptContent;
+  self.scriptModel.bundleID = candidate.bundleID;
+  self.savedEditorText = candidate.scriptContent;
+  [self updateHeaderInfo];
+  return YES;
+}
+
+- (VMScriptModel *)scriptModelForSaving {
+  VMScriptModel *candidate = [VMScriptModel fromDictionary:[self.scriptModel toDictionary]];
+  candidate.appName = self.scriptModel.appName;
+  return candidate;
+}
+
+- (void)showSaveError {
+  UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Alert_Error")
+      message:self.lastSaveError.localizedDescription ?: TR(@"Err_Write_Permission")
+      preferredStyle:UIAlertControllerStyleAlert];
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_OK") style:UIAlertActionStyleDefault handler:nil]];
+  [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (BOOL)writeScriptModelToDisk:(VMScriptModel *)model {
+  self.lastSaveError = nil;
   NSString *doc = [NSSearchPathForDirectoriesInDomains(
       NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-
-  NSString *bid = self.scriptModel.bundleID;
+  if (!doc.length || !model.fileName.length) {
+    self.lastSaveError = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileWriteInvalidFileNameError userInfo:nil];
+    return NO;
+  }
+  NSString *bid = model.bundleID;
   if (!bid || bid.length == 0) {
     bid = [[VMMemoryEngine shared] currentBundleID] ?: TR(@"App_Unknown");
-    self.scriptModel.bundleID = bid;
+    model.bundleID = bid;
   }
 
   NSString *dir = [[doc stringByAppendingPathComponent:@"VansonMod/Script"]
       stringByAppendingPathComponent:bid];
 
   if (![[NSFileManager defaultManager] fileExistsAtPath:dir]) {
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir
+    NSError *error = nil;
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:dir
                               withIntermediateDirectories:YES
                                                attributes:nil
-                                                    error:nil];
+                                                    error:&error]) {
+      self.lastSaveError = error;
+      return NO;
+    }
   }
 
   NSString *path =
-      [dir stringByAppendingPathComponent:self.scriptModel.fileName];
+      [dir stringByAppendingPathComponent:model.fileName];
 
-  VMDataSession *s = [VMDataSession sessionWithData:@[ self.scriptModel ]
+  VMDataSession *s = [VMDataSession sessionWithData:@[ model ]
                                            bundleID:bid
                                            dataType:@"script"];
-
-  return [[s toJSONData] writeToFile:path atomically:YES];
+  NSData *data = [s toJSONData];
+  NSError *error = nil;
+  BOOL success = [data writeToFile:path options:NSDataWritingAtomic error:&error];
+  self.lastSaveError = error;
+  return success;
 }
 
 - (void)setupNavigationTitle {
@@ -454,6 +531,8 @@
   lbl.text = self.scriptModel.note ?: TR(@"Script_Title_Default");
   lbl.font = [UIFont boldSystemFontOfSize:17];
   lbl.textColor = [UIColor labelColor];
+  lbl.lineBreakMode = NSLineBreakByTruncatingTail;
+  [lbl setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
   lbl.translatesAutoresizingMaskIntoConstraints = NO;
   [titleView addSubview:lbl];
   objc_setAssociatedObject(self, "navTitleLabel", lbl,
@@ -462,7 +541,7 @@
   UIImageView *icon = nil;
   if (!self.scriptModel.isImported) {
     icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"pencil"]];
-    icon.tintColor = [UIColor systemBlueColor];
+    icon.tintColor = [VMUIHelper accentColor];
     icon.contentMode = UIViewContentModeScaleAspectFit;
     icon.translatesAutoresizingMaskIntoConstraints = NO;
     [titleView addSubview:icon];
@@ -495,8 +574,13 @@
         [[UITapGestureRecognizer alloc] initWithTarget:self
                                                 action:@selector(editNoteAction)];
     [titleView addGestureRecognizer:tap];
+    titleView.isAccessibilityElement = YES;
+    titleView.accessibilityTraits = UIAccessibilityTraitButton;
+    titleView.accessibilityLabel = [NSString stringWithFormat:@"%@ · %@", lbl.text, TR(@"Title_Edit_Script_Info")];
   }
 
+  self.navigationTitleWidthConstraint = [titleView.widthAnchor constraintLessThanOrEqualToConstant:260];
+  self.navigationTitleWidthConstraint.active = YES;
   self.navigationItem.titleView = titleView;
 }
 
@@ -504,6 +588,9 @@
   UILabel *lbl = objc_getAssociatedObject(self, "navTitleLabel");
   if (lbl) {
     lbl.text = title;
+    if (!self.scriptModel.isImported) {
+      self.navigationItem.titleView.accessibilityLabel = [NSString stringWithFormat:@"%@ · %@", title, TR(@"Title_Edit_Script_Info")];
+    }
     
     [self.navigationItem.titleView sizeToFit];
   }
@@ -525,29 +612,36 @@
 #pragma mark - Keyboard
 
 - (void)keyboardWillShow:(NSNotification *)notification {
-  NSDictionary *info = [notification userInfo];
-  CGRect keyboardFrame = [info[UIKeyboardFrameEndUserInfoKey] CGRectValue];
-  CGFloat duration = [info[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
-
-  [UIView animateWithDuration:duration
-                   animations:^{
-                     self.bottomBar.transform =
-                         CGAffineTransformMakeTranslation(
-                             0, -keyboardFrame.size.height);
-                   }];
+  NSDictionary *info = notification.userInfo;
+  CGRect screenFrame = [info[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+  CGRect frame = [self.view convertRect:screenFrame fromView:nil];
+  CGRect intersection = CGRectIntersection(self.view.bounds, frame);
+  BOOL docked = !CGRectIsNull(intersection) && CGRectGetMaxY(frame) >= CGRectGetMaxY(self.view.bounds) - 1;
+  CGFloat overlap = docked ? MAX(0, CGRectGetHeight(intersection) - self.view.safeAreaInsets.bottom) : 0;
+  self.contentBottomConstraint.constant = -16 - overlap;
+  BOOL editing = overlap > 0;
+  self.headerView.hidden = editing;
+  self.consoleView.hidden = editing;
+  self.commandStack.hidden = editing;
+  NSTimeInterval duration = [info[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+  UIViewAnimationOptions options = (UIViewAnimationOptions)([info[UIKeyboardAnimationCurveUserInfoKey] integerValue] << 16);
+  [UIView animateWithDuration:duration delay:0 options:options animations:^{ [self.view layoutIfNeeded]; } completion:nil];
 }
 
 - (void)keyboardWillHide:(NSNotification *)notification {
-  NSDictionary *info = [notification userInfo];
-  CGFloat duration = [info[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
-
-  [UIView animateWithDuration:duration
-                   animations:^{
-                     self.bottomBar.transform = CGAffineTransformIdentity;
-                   }];
+  self.contentBottomConstraint.constant = -16;
+  self.headerView.hidden = NO;
+  self.consoleView.hidden = NO;
+  self.commandStack.hidden = NO;
+  [UIView animateWithDuration:[notification.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue]
+      animations:^{ [self.view layoutIfNeeded]; }];
 }
 
 - (void)smartInsertCode:(NSString *)code {
+  if (self.scriptModel.isImported) {
+    [self showToast:TR(@"Status_ReadOnly")];
+    return;
+  }
   NSString *text = self.editorView.text ?: @"";
   NSRange selectedRange = self.editorView.selectedRange;
   NSUInteger cursorPos = selectedRange.location;
@@ -580,6 +674,7 @@
   }
   
   [self.editorView insertText:insertText];
+  [self textViewDidChange:self.editorView];
 }
 
 @end

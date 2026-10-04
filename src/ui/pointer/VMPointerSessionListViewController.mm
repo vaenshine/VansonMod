@@ -3,6 +3,7 @@
 #import "../../utils/helpers/VMUIHelper.h"
 #import "../pointer/VMPointerVerifierViewController.h"
 #import "include/VMLocalization.h"
+#import "include/VMDataSession.h"
 #import "include/VMPointerManager.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #define TR(key) ([[VMLocalization shared] localizedString:key])
@@ -48,6 +49,8 @@
   self.tableView.allowsMultipleSelectionDuringEditing = YES;
   self.tableView.autoresizingMask =
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  [VMUIHelper styleTableView:self.tableView];
+  self.view.tintColor = [VMUIHelper accentColor];
   [self.view addSubview:self.tableView];
   [VMUIHelper addFixedFooterTo:self forTableView:self.tableView];
   UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc]
@@ -58,18 +61,24 @@
   [self loadData];
 }
 
+- (void)viewWillAppear:(BOOL)animated {
+  [super viewWillAppear:animated];
+  [self loadData];
+}
+
 #pragma mark - Navigation & Batch Mode
 - (void)updateNavBarButtons {
   if (self.tableView.isEditing) {
     UIBarButtonItem *selAllBtn =
-        [[UIBarButtonItem alloc] initWithTitle:TR(@"Batch_Sel_All")
+        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle"]
                                          style:UIBarButtonItemStylePlain
                                         target:self
                                         action:@selector(batchSelectAll)];
+    selAllBtn.accessibilityLabel = TR(@"Batch_Sel_All");
     self.navigationItem.leftBarButtonItem = selAllBtn;
     UIBarButtonItem *cancelBtn =
         [[UIBarButtonItem alloc] initWithTitle:TR(@"Btn_Cancel")
-                                         style:UIBarButtonItemStyleDone
+                                         style:UIBarButtonItemStylePlain
                                         target:self
                                         action:@selector(exitBatchMode)];
     self.navigationItem.rightBarButtonItem = cancelBtn;
@@ -94,7 +103,11 @@
                 style:UIBarButtonItemStylePlain
                target:self
                action:@selector(importSession)];
-    self.navigationItem.rightBarButtonItems = @[ importBtn ];
+    importBtn.accessibilityLabel = TR(@"Act_Import");
+    UIBarButtonItem *select = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checklist"] style:UIBarButtonItemStylePlain target:self action:@selector(enterBatchMode)];
+    select.accessibilityLabel = TR(@"Btn_Batch_Select");
+    self.navigationItem.rightBarButtonItems = @[importBtn, select];
+    select.enabled = (self.isFolderMode ? self.folderList.count : self.sessionFiles.count) > 0;
   }
 }
 
@@ -152,6 +165,7 @@
   }
   [self.folderList
       sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+  [self updateEmptyState];
   [self.tableView reloadData];
 }
 
@@ -162,6 +176,7 @@
 - (void)loadSessions {
   [self.sessionFiles removeAllObjects];
   if (!self.bundleID || self.bundleID.length == 0) {
+    [self updateEmptyState];
     [self.tableView reloadData];
     return;
   }
@@ -192,6 +207,7 @@
         return [attrB.fileModificationDate compare:attrA.fileModificationDate];
       }];
   self.sessionFiles = [sorted mutableCopy];
+  [self updateEmptyState];
   [self.tableView reloadData];
 }
 
@@ -214,14 +230,32 @@
     return;
   NSURL *url = urls.firstObject;
   BOOL accessing = [url startAccessingSecurityScopedResource];
-  if (!self.bundleID || self.bundleID.length == 0) {
-    [self showToast:TR(@"Err_Not_Connected_Msg")];
-    if (accessing)
-      [url stopAccessingSecurityScopedResource];
+  NSData *data = [NSData dataWithContentsOfURL:url];
+  VMDataSession *session = nil;
+  @try {
+    session = data ? [VMDataSession fromVerifierData:data] : nil;
+  } @catch (NSException *exception) {
+    session = nil;
+  }
+  BOOL isPointerSession = ([session.dataType isKindOfClass:NSString.class] &&
+      [session.dataType isEqualToString:@"pointer"]) ||
+      [session.dataItems.firstObject isKindOfClass:VMPointerChain.class];
+  if (![url.pathExtension.lowercaseString isEqualToString:@"vmvapt"] || !session || !isPointerSession) {
+    [self showToast:TR(@"Err_File_Read")];
+    if (accessing) [url stopAccessingSecurityScopedResource];
+    return;
+  }
+  NSString *destinationBundle = self.bundleID.length > 0 ? self.bundleID : session.bundleID;
+  if (![destinationBundle isKindOfClass:NSString.class] || destinationBundle.length == 0 ||
+      [destinationBundle containsString:@"/"] || [destinationBundle isEqualToString:@".."] ||
+      [destinationBundle isEqualToString:@"."] ||
+      [destinationBundle rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location != NSNotFound) {
+    [self showToast:TR(@"Err_File_Read")];
+    if (accessing) [url stopAccessingSecurityScopedResource];
     return;
   }
   NSString *pointerDir = [VMPointerManager shared].verifierFolder;
-  NSString *appDir = [pointerDir stringByAppendingPathComponent:self.bundleID];
+  NSString *appDir = [pointerDir stringByAppendingPathComponent:destinationBundle];
   NSFileManager *fm = [NSFileManager defaultManager];
   if (![fm fileExistsAtPath:appDir]) {
     [fm createDirectoryAtPath:appDir
@@ -242,7 +276,7 @@
   }
   NSError *err;
   if ([fm copyItemAtPath:url.path toPath:destPath error:&err]) {
-    [self loadSessions];
+    [self loadData];
     [self showToast:TR(@"Ptr_Import_Success")];
   } else {
     [self showToast:[NSString stringWithFormat:TR(@"Err_Import_Failed"),
@@ -276,66 +310,27 @@
 }
 
 - (void)performBatchDelete {
-  NSArray *selectedPaths = [self.tableView indexPathsForSelectedRows];
-  if (!selectedPaths || selectedPaths.count == 0) {
-    [self showToast:TR(@"Msg_No_Sel")];
-    return;
-  }
-  NSString *confirmMsg = [NSString
-      stringWithFormat:@"%@ %@", TR(@"Act_Delete"),
-                       [NSString stringWithFormat:TR(@"Ptr_Delete_Confirm_Fmt"),
-                                                  (unsigned long)
-                                                      selectedPaths.count]];
-  UIAlertController *alert =
-      [UIAlertController alertControllerWithTitle:TR(@"Alert_Warn")
-                                          message:confirmMsg
-                                   preferredStyle:UIAlertControllerStyleAlert];
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
-                                            style:UIAlertActionStyleCancel
-                                          handler:nil]];
-  [alert
-      addAction:
-          [UIAlertAction
-              actionWithTitle:TR(@"Act_Delete")
-                        style:UIAlertActionStyleDestructive
-                      handler:^(UIAlertAction *_Nonnull action) {
-                        NSArray *sortedPaths = [selectedPaths
-                            sortedArrayUsingComparator:^NSComparisonResult(
-                                NSIndexPath *obj1, NSIndexPath *obj2) {
-                              return [obj2 compare:obj1];
-                            }];
-                        NSFileManager *fm = [NSFileManager defaultManager];
-                        if (self.isFolderMode) {
-                          NSString *root =
-                              [VMPointerManager shared].verifierFolder;
-                          for (NSIndexPath *ip in sortedPaths) {
-                            if (ip.row < self.folderList.count) {
-                              NSString *name = self.folderList[ip.row];
-                              NSString *path =
-                                  [root stringByAppendingPathComponent:name];
-                              [fm removeItemAtPath:path error:nil];
-                              [self.folderList removeObjectAtIndex:ip.row];
-                            }
-                          }
-                        } else {
-                          NSString *pointerDir =
-                              [[VMPointerManager shared].verifierFolder
-                                  stringByAppendingPathComponent:self.bundleID];
-                          for (NSIndexPath *ip in sortedPaths) {
-                            if (ip.row < self.sessionFiles.count) {
-                              NSString *fileName = self.sessionFiles[ip.row];
-                              NSString *path = [pointerDir
-                                  stringByAppendingPathComponent:fileName];
-                              [fm removeItemAtPath:path error:nil];
-                              [self.sessionFiles removeObjectAtIndex:ip.row];
-                            }
-                          }
-                          [self exitBatchMode];
-                          [self checkAndCleanupCurrentFolder];
-                          [self.tableView reloadData];
-                        }
-                        [self showToast:TR(@"Batch_Del_Success")];
-                      }]];
+  NSArray<NSIndexPath *> *selected = [self.tableView.indexPathsForSelectedRows copy];
+  if (selected.count == 0) { [self showToast:TR(@"Msg_No_Sel")]; return; }
+  UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Alert_Warn") message:[NSString stringWithFormat:TR(@"Ptr_Delete_Confirm_Fmt"), (unsigned long)selected.count] preferredStyle:UIAlertControllerStyleAlert];
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Act_Delete") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    NSFileManager *manager = NSFileManager.defaultManager;
+    NSString *root = [VMPointerManager shared].verifierFolder;
+    if (!self.isFolderMode) root = [root stringByAppendingPathComponent:self.bundleID];
+    NSArray *names = self.isFolderMode ? [self.folderList copy] : [self.sessionFiles copy];
+    NSError *failure = nil;
+    for (NSIndexPath *path in selected) {
+      if (path.row >= names.count) continue;
+      NSError *error = nil;
+      [manager removeItemAtPath:[root stringByAppendingPathComponent:names[path.row]] error:&error];
+      if (error) failure = error;
+    }
+    [self exitBatchMode];
+    [self loadData];
+    if (failure) [self showToast:failure.localizedDescription];
+    else [self showToast:TR(@"Batch_Del_Success")];
+  }]];
   [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -346,26 +341,8 @@
   return self.sessionFiles.count;
 }
 
-- (NSString *)tableView:(UITableView *)tableView
-    titleForHeaderInSection:(NSInteger)section {
-  if (self.isFolderMode)
-    return TR(@"Ptr_Sessions_Header");
-  return nil;
-}
-
-- (NSString *)tableView:(UITableView *)tableView
-    titleForFooterInSection:(NSInteger)section {
-  if (self.isFolderMode) {
-    if (self.folderList.count == 0) {
-      return TR(@"Ptr_Sessions_Empty");
-    }
-  } else {
-    if (self.sessionFiles.count == 0) {
-      return TR(@"Ptr_Sessions_Empty");
-    }
-  }
-  return nil;
-}
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return nil; }
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return nil; }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView
          cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -394,7 +371,9 @@
     NSString *idxStr =
         [NSString stringWithFormat:@"[%ld] ", (long)(indexPath.row + 1)];
     cell.textLabel.text = [NSString stringWithFormat:@"%@%@", idxStr, fileName];
-    cell.textLabel.font = [UIFont systemFontOfSize:15];
+    cell.textLabel.font = [VMUIHelper scaledFontOfSize:16 weight:UIFontWeightSemibold];
+    cell.textLabel.adjustsFontForContentSizeCategory = YES;
+    cell.textLabel.numberOfLines = 0;
     NSString *fullPath = [[[VMPointerManager shared].verifierFolder
         stringByAppendingPathComponent:self.bundleID]
         stringByAppendingPathComponent:fileName];
@@ -403,7 +382,8 @@
                                                          error:nil];
     NSDate *modDate = attrs.fileModificationDate;
     NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+    fmt.dateStyle = NSDateFormatterMediumStyle;
+    fmt.timeStyle = NSDateFormatterShortStyle;
     cell.detailTextLabel.text = [fmt stringFromDate:modDate];
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     return cell;
@@ -438,12 +418,13 @@
 
 - (BOOL)tableView:(UITableView *)tableView
     canEditRowAtIndexPath:(NSIndexPath *)indexPath {
-  return !self.isFolderMode;
+  return YES;
 }
 
 - (void)tableView:(UITableView *)tableView
     commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
      forRowAtIndexPath:(NSIndexPath *)indexPath {
+  if (self.isFolderMode) return;
   if (editingStyle == UITableViewCellEditingStyleDelete) {
     NSString *fileName = self.sessionFiles[indexPath.row];
     NSString *pointerDir = [[VMPointerManager shared].verifierFolder
@@ -474,7 +455,7 @@
       filteredArrayUsingPredicate:
           [NSPredicate predicateWithFormat:@"self ENDSWITH '.vmvapt'"]];
   if (vmvaptFiles.count == 0) {
-    [fm removeItemAtPath:pointerDir error:nil];
+    if (contents.count == 0) [fm removeItemAtPath:pointerDir error:nil];
     dispatch_async(dispatch_get_main_queue(), ^{
       [self.navigationController popViewControllerAnimated:YES];
     });
@@ -620,6 +601,10 @@
                   newName:(NSString *)newName
                 extension:(NSString *)ext
               atIndexPath:(NSIndexPath *)indexPath {
+  newName = [newName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+  if (newName.length == 0 || [newName containsString:@"/"] || [newName containsString:@"\\"] || [newName isEqualToString:@"."] || [newName isEqualToString:@".."]) {
+    [self showToast:TR(@"Placeholder_New_Name")]; return;
+  }
   NSString *pointerDir = [[VMPointerManager shared].verifierFolder
       stringByAppendingPathComponent:self.bundleID];
 
@@ -652,6 +637,13 @@
     [self showToast:[NSString stringWithFormat:@"Error: %@",
                                                error.localizedDescription]];
   }
+}
+
+- (void)updateEmptyState {
+  NSUInteger count = self.isFolderMode ? self.folderList.count : self.sessionFiles.count;
+  self.tableView.tableFooterView.hidden = count == 0;
+  if (!self.tableView.isEditing && self.navigationItem.rightBarButtonItems.count > 1) self.navigationItem.rightBarButtonItems[1].enabled = count > 0;
+  self.tableView.backgroundView = count == 0 ? [VMUIHelper emptyStateWithTitle:TR(@"Ptr_Sessions_Header") message:TR(@"Ptr_Sessions_Empty") symbol:@"point.3.connected.trianglepath.dotted"] : nil;
 }
 
 @end

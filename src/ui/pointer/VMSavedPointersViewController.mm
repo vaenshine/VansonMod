@@ -31,6 +31,8 @@
   self.tableView.dataSource = self;
   self.tableView.autoresizingMask =
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  [VMUIHelper styleTableView:self.tableView];
+  self.view.tintColor = [VMUIHelper accentColor];
   [self.view addSubview:self.tableView];
   [VMUIHelper addFixedFooterTo:self forTableView:self.tableView];
 }
@@ -44,6 +46,7 @@
   NSArray *contents = [fm contentsOfDirectoryAtPath:root error:nil];
 
   if (!contents) {
+    [self updateEmptyState];
     [self.tableView reloadData];
     return;
   }
@@ -58,14 +61,15 @@
       continue;
 
     NSArray *files = [fm contentsOfDirectoryAtPath:fullPath error:nil];
-    NSUInteger fileCount = files.count;
+    NSUInteger fileCount = [[files filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"self ENDSWITH %@", @".vmvapt"]] count];
+    if (fileCount == 0) continue;
     VMDataSession *session = nil;
 
     for (NSString *fileName in files) {
       if (!session && [fileName hasSuffix:@".vmvapt"]) {
         NSString *filePath = [fullPath stringByAppendingPathComponent:fileName];
         NSData *data = [NSData dataWithContentsOfFile:filePath];
-        session = [VMDataSession fromJSONData:data];
+        session = [VMDataSession fromVerifierData:data];
       }
     }
 
@@ -85,6 +89,7 @@
 
   [self.folderList
       sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+  [self updateEmptyState];
   [self.tableView reloadData];
 }
 
@@ -155,6 +160,10 @@
     cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                   reuseIdentifier:cid];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    cell.textLabel.font = [VMUIHelper scaledFontOfSize:16 weight:UIFontWeightSemibold];
+    cell.textLabel.adjustsFontForContentSizeCategory = YES;
+    cell.textLabel.numberOfLines = 0;
+    cell.detailTextLabel.numberOfLines = 0;
   }
   NSString *bid = self.folderList[indexPath.row];
   NSDictionary *meta = self.folderMetadata[bid];
@@ -166,7 +175,7 @@
     cell.textLabel.text = name;
   NSUInteger count = [meta[@"count"] unsignedIntegerValue];
   cell.detailTextLabel.text =
-      [NSString stringWithFormat:@"%@ (%lu pts)", bid, (unsigned long)count];
+      [NSString stringWithFormat:@"%@ · %lu", bid, (unsigned long)count];
   cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
   cell.imageView.image = [UIImage systemImageNamed:@"folder.fill"];
   cell.imageView.tintColor = [UIColor systemBlueColor];
@@ -181,6 +190,11 @@
       [[VMPointerSessionListViewController alloc] init];
   vc.bundleID = bid;
   [self.navigationController pushViewController:vc animated:YES];
+}
+
+- (void)updateEmptyState {
+  self.tableView.tableFooterView.hidden = self.folderList.count == 0;
+  self.tableView.backgroundView = self.folderList.count == 0 ? [VMUIHelper emptyStateWithTitle:TR(@"Ptr_Manager_Title") message:TR(@"Ptr_Sessions_Empty") symbol:@"folder"] : nil;
 }
 
 @end

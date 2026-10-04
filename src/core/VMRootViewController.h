@@ -4,5 +4,8 @@
 
 - (void)showDisclaimer:(BOOL)isReadOnly;
 - (void)applyTabOrder;
+- (void)showTabReorder;
+- (void)refreshLocalizedPages;
+- (void)refreshBrandingOverlay;
 
 @end

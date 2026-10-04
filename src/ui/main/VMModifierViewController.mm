@@ -1,4 +1,5 @@
 #import "../main/VMModifierViewController.h"
+#import "../../core/VMRootViewController.h"
 #import "../../utils/helpers/VMUIHelper.h"
 #import "../main/VMLockListViewController.h"
 #import "../memory/VMHexEditorViewController.h"
@@ -28,7 +29,6 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 @property(nonatomic, strong) UIButton *btnCloseBatch;
 @property(nonatomic, strong) UITextField *inputField;
 @property(nonatomic, strong) UIButton *searchBtn;
-@property(nonatomic, strong) UIButton *nearbyBtn;
 @property(nonatomic, strong) UIButton *resetBtn;
 @property(nonatomic, strong) UISegmentedControl *dataTypeSegment;
 @property(nonatomic, strong) UISegmentedControl *searchModeSegment;
@@ -62,6 +62,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 @property(nonatomic, strong) UIStackView *toolRowInHeader; 
 @property(nonatomic, assign) BOOL isToolBarVisible;
 @property(nonatomic, strong) UIStackView *headerMainStack;
+@property(nonatomic, strong) UIView *contextHeader;
+@property(nonatomic, copy) NSString *contextHeaderText;
 @property(nonatomic, strong)
     NSMutableDictionary<NSNumber *, NSString *> *inputHistory;
 @property(nonatomic, assign) NSInteger previousModeIndex;
@@ -117,11 +119,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
   [self updateButtonStates];
 
-  [[NSNotificationCenter defaultCenter]
-      addObserver:self
-         selector:@selector(handleReset)
-             name:@"VMProcessChangedNotification"
-           object:nil];
+
 
   if (self.isPointerSearchMode) {
     NSUInteger depth = [VMMemoryEngine shared].sessionStack.count;
@@ -177,11 +175,21 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 - (void)viewDidLayoutSubviews {
   [super viewDidLayoutSubviews];
   [self updateTableHeaderHeight:self.tableView.tableHeaderView];
+  [VMUIHelper sizeFooterToFitTableView:self.tableView];
 
   [self updateBatchBarStyle];
   
   [self.view bringSubviewToFront:self.floatingToolBar];
   [self.view bringSubviewToFront:self.floatingBatchBar];
+  if ([self.tabBarController isKindOfClass:VMRootViewController.class])
+    [(VMRootViewController *)self.tabBarController refreshBrandingOverlay];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
+  if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+    self.toolbarContainer.layer.borderColor = [UIColor.separatorColor resolvedColorWithTraitCollection:self.traitCollection].CGColor;
+  }
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -214,6 +222,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 - (void)viewWillAppear:(BOOL)animated {
   [super viewWillAppear:animated];
   [[VMMemoryEngine shared] switchContext:@"mod"];
+  [self refreshProcessHeader];
   int currentPid = [VMMemoryEngine shared].targetPid;
 
   if (currentPid != self.lastAttachedPID) {
@@ -242,12 +251,14 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 - (void)setupUI {
   self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
   self.tableView = [[UITableView alloc] initWithFrame:CGRectZero
-                                                style:UITableViewStylePlain];
+                                                style:UITableViewStyleInsetGrouped];
   self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
   self.tableView.delegate = self;
   self.tableView.dataSource = self;
   self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
-  self.tableView.backgroundColor = [UIColor clearColor];
+  [VMUIHelper styleTableView:self.tableView];
+  self.tableView.rowHeight = UITableViewAutomaticDimension;
+  self.tableView.estimatedRowHeight = 72;
 
   self.tableView.allowsMultipleSelectionDuringEditing = YES;
 
@@ -264,6 +275,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.floatingBatchBar.layer.cornerRadius = 12;
   self.floatingBatchBar.clipsToBounds = YES;
   self.floatingBatchBar.hidden = YES;
+  self.floatingBatchBar.accessibilityIdentifier = @"vmBrandingAvoidance";
   self.floatingBatchBar.alpha = 0;
 
   self.floatingBatchBar.userInteractionEnabled = YES;
@@ -302,6 +314,42 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [self updateButtonStates];
 }
 
+- (UIScrollView *)horizontalStripForView:(UIView *)content minimumWidth:(CGFloat)width height:(CGFloat)height {
+  UIScrollView *scroll = [UIScrollView new];
+  scroll.showsHorizontalScrollIndicator = NO;
+  scroll.showsVerticalScrollIndicator = NO;
+  scroll.alwaysBounceHorizontal = YES;
+  content.translatesAutoresizingMaskIntoConstraints = NO;
+  [scroll addSubview:content];
+  [NSLayoutConstraint activateConstraints:@[
+    [scroll.heightAnchor constraintEqualToConstant:height],
+    [content.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor],
+    [content.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor],
+    [content.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor],
+    [content.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor],
+    [content.heightAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.heightAnchor],
+    [content.widthAnchor constraintGreaterThanOrEqualToAnchor:scroll.frameLayoutGuide.widthAnchor],
+    [content.widthAnchor constraintGreaterThanOrEqualToConstant:width]
+  ]];
+  NSLayoutConstraint *preferred = [content.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor];
+  preferred.priority = UILayoutPriorityDefaultHigh;
+  preferred.active = YES;
+  return scroll;
+}
+
+- (void)refreshProcessHeader {
+  VMMemoryEngine *engine = [VMMemoryEngine shared];
+  NSString *name = engine.currentProcessName ?: TR(@"Err_Not_Connected");
+  NSString *bundleID = engine.currentBundleID ?: @"";
+  NSString *identity = [NSString stringWithFormat:@"%d|%@|%@", engine.targetPid, bundleID, name];
+  if (self.contextHeader && [identity isEqualToString:self.contextHeaderText]) return;
+  [self.contextHeader removeFromSuperview];
+  self.contextHeaderText = identity;
+  self.contextHeader = [VMUIHelper processHeaderWithName:name bundleID:bundleID pid:engine.targetPid];
+  [self.headerMainStack insertArrangedSubview:self.contextHeader atIndex:0];
+  [self updateTableHeaderHeight:self.tableView.tableHeaderView];
+}
+
 - (UIView *)buildModernHeader {
   UIView *wrapper = [[UIView alloc]
       initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 300)];
@@ -309,23 +357,25 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
   self.headerMainStack = [[UIStackView alloc] init];
   self.headerMainStack.axis = UILayoutConstraintAxisVertical;
-  self.headerMainStack.spacing = 12;
+  self.headerMainStack.spacing = 10;
   self.headerMainStack.translatesAutoresizingMaskIntoConstraints = NO;
   [wrapper addSubview:self.headerMainStack];
 
   [NSLayoutConstraint activateConstraints:@[
     [self.headerMainStack.topAnchor constraintEqualToAnchor:wrapper.topAnchor
-                                                   constant:12],
+                                                   constant:8],
     [self.headerMainStack.leadingAnchor
         constraintEqualToAnchor:wrapper.leadingAnchor
-                       constant:12],
+                       constant:16],
     [self.headerMainStack.trailingAnchor
         constraintEqualToAnchor:wrapper.trailingAnchor
-                       constant:-12],
+                       constant:-16],
     [self.headerMainStack.bottomAnchor
         constraintEqualToAnchor:wrapper.bottomAnchor
-                       constant:-12]
+                       constant:-8]
   ]];
+
+  [self refreshProcessHeader];
 
   self.searchModeSegment = [[UISegmentedControl alloc] initWithItems:@[
     TR(@"Mod_Mode_Exact"), TR(@"Mod_Mode_Fuzzy"), TR(@"Mod_Mode_Group")
@@ -334,13 +384,20 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [self.searchModeSegment addTarget:self
                              action:@selector(modeChanged)
                    forControlEvents:UIControlEventValueChanged];
-  [self.searchModeSegment.heightAnchor constraintEqualToConstant:32].active =
+  [self.searchModeSegment.heightAnchor constraintEqualToConstant:44].active =
       YES;
-  [self.headerMainStack addArrangedSubview:self.searchModeSegment];
+  self.btnReset = [VMUIHelper createIconButton:@"arrow.counterclockwise" color:UIColor.systemRedColor
+      target:self action:@selector(handleReset)];
+  self.btnReset.accessibilityLabel = TR(@"Mod_Reset");
+  [self.btnReset.widthAnchor constraintEqualToConstant:44].active = YES;
+  [self.btnReset.heightAnchor constraintEqualToConstant:44].active = YES;
+  UIStackView *modeRow = [[UIStackView alloc] initWithArrangedSubviews:@[self.searchModeSegment, self.btnReset]];
+  modeRow.spacing = 8;
+  [self.headerMainStack addArrangedSubview:modeRow];
   
   UIStackView *searchRow = [[UIStackView alloc] init];
   searchRow.spacing = 6;
-  [searchRow.heightAnchor constraintEqualToConstant:40].active = YES;
+  [searchRow.heightAnchor constraintEqualToConstant:48].active = YES;
 
   self.inputField = [[UITextField alloc] init];
   self.inputField.borderStyle = UITextBorderStyleRoundedRect;
@@ -350,13 +407,17 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.inputField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
   self.inputField.delegate = self;
   self.inputField.returnKeyType = UIReturnKeySearch;
+  [self.inputField addTarget:self action:@selector(updateButtonStates) forControlEvents:UIControlEventEditingChanged];
   [self addDoneButtonTo:self.inputField];
 
   self.searchBtn = [self createTextOnlyBtn:TR(@"Common_Search")
                                      color:[UIColor systemBlueColor]
                                        sel:@selector(handleSearch)];
-  [self.searchBtn.widthAnchor constraintEqualToConstant:70].active = YES;
+  [self.searchBtn.widthAnchor constraintGreaterThanOrEqualToConstant:88].active = YES;
 
+  [VMUIHelper styleTextField:self.inputField];
+  self.inputField.accessibilityLabel = TR(@"Mod_Input_Value_Placeholder");
+  [VMUIHelper styleButton:self.searchBtn primary:YES];
   [searchRow addArrangedSubview:self.inputField];
   [searchRow addArrangedSubview:self.searchBtn];
   [self.headerMainStack addArrangedSubview:searchRow];
@@ -367,15 +428,19 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [self.dataTypeSegment addTarget:self
                            action:@selector(dataTypeChanged)
                  forControlEvents:UIControlEventValueChanged];
-  [self.dataTypeSegment.heightAnchor constraintEqualToConstant:32].active = YES;
+  [self.dataTypeSegment.heightAnchor constraintEqualToConstant:44].active = YES;
   
-  [self.dataTypeSegment setTitleTextAttributes:@{NSFontAttributeName: [UIFont systemFontOfSize:11]} forState:UIControlStateNormal];
-  [self.headerMainStack addArrangedSubview:self.dataTypeSegment];
+  [self.dataTypeSegment setTitleTextAttributes:@{NSFontAttributeName: [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightSemibold]} forState:UIControlStateNormal];
+  self.dataTypeSegment.accessibilityLabel = TR(@"Lock_Select_Type_Title");
+  [self.headerMainStack addArrangedSubview:[self horizontalStripForView:self.dataTypeSegment minimumWidth:550 height:44]];
 
   self.fuzzySegRow1 = [[UISegmentedControl alloc] initWithItems:@[
     TR(@"Fuz_Increased"), TR(@"Fuz_Decreased"), TR(@"Fuz_Unchanged"),
     TR(@"Fuz_Changed")
   ]];
+  NSLayoutConstraint *fuzzyHeight1 = [self.fuzzySegRow1.heightAnchor constraintEqualToConstant:44];
+  fuzzyHeight1.priority = 999;
+  fuzzyHeight1.active = YES;
   self.fuzzySegRow1.hidden = YES;
   [self.fuzzySegRow1 addTarget:self
                         action:@selector(fuzzyRow1Selected:)
@@ -384,6 +449,9 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
   self.fuzzySegRow2 = [[UISegmentedControl alloc]
       initWithItems:@[ TR(@"Fuz_Inc_Val"), TR(@"Fuz_Dec_Val") ]];
+  NSLayoutConstraint *fuzzyHeight2 = [self.fuzzySegRow2.heightAnchor constraintEqualToConstant:44];
+  fuzzyHeight2.priority = 999;
+  fuzzyHeight2.active = YES;
   self.fuzzySegRow2.hidden = YES;
   [self.fuzzySegRow2 addTarget:self
                         action:@selector(fuzzyRow2Selected:)
@@ -391,9 +459,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [self.headerMainStack addArrangedSubview:self.fuzzySegRow2];
 
   self.fuzzyHintLabel = [[UILabel alloc] init];
-  self.fuzzyHintLabel.font = [UIFont systemFontOfSize:11];
+  self.fuzzyHintLabel.font = [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightSemibold];
   self.fuzzyHintLabel.textColor = [UIColor systemGrayColor];
   self.fuzzyHintLabel.textAlignment = NSTextAlignmentCenter;
+  self.fuzzyHintLabel.numberOfLines = 0;
   self.fuzzyHintLabel.hidden = YES;
   [self.headerMainStack addArrangedSubview:self.fuzzyHintLabel];
 
@@ -401,7 +470,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   toolRow.axis = UILayoutConstraintAxisHorizontal;
   toolRow.distribution = UIStackViewDistributionFillEqually;
   toolRow.spacing = 6;
-  [toolRow.heightAnchor constraintEqualToConstant:36].active = YES;
+  [toolRow.heightAnchor constraintEqualToConstant:44].active = YES;
   toolRow.tag = 1001; 
   self.toolRowInHeader = toolRow; 
 
@@ -418,16 +487,11 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.btnBatch = [self createTextOnlyBtn:TR(@"Btn_Batch_Select")
                                     color:[UIColor systemGreenColor]
                                       sel:@selector(toggleBatchMode)];
-  self.btnReset = [self createTextOnlyBtn:TR(@"Mod_Reset")
-                                    color:[UIColor systemRedColor]
-                                      sel:@selector(handleReset)];
-
   [toolRow addArrangedSubview:self.btnRefresh];
   [toolRow addArrangedSubview:self.btnNearby];
   [toolRow addArrangedSubview:self.btnFilter];
   [toolRow addArrangedSubview:self.btnBatch];
-  [toolRow addArrangedSubview:self.btnReset];
-  [self.headerMainStack addArrangedSubview:toolRow];
+  [self.headerMainStack addArrangedSubview:[self horizontalStripForView:toolRow minimumWidth:400 height:44]];
 
   self.filterPanelView = [self buildFilterPanel];
   self.filterPanelView.hidden = YES;
@@ -438,43 +502,21 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.statusLabel.font = [UIFont systemFontOfSize:12
                                             weight:UIFontWeightMedium];
   self.statusLabel.textColor = [UIColor secondaryLabelColor];
-  self.statusLabel.textAlignment = NSTextAlignmentCenter;
+  self.statusLabel.textAlignment = NSTextAlignmentNatural;
+  self.statusLabel.numberOfLines = 0;
+  self.statusLabel.accessibilityTraits = UIAccessibilityTraitUpdatesFrequently;
   [self.headerMainStack addArrangedSubview:self.statusLabel];
 
   return wrapper;
 }
 
-- (UIButton *)createTextOnlyBtn:(NSString *)title
-                          color:(UIColor *)color
-                            sel:(SEL)sel {
+- (UIButton *)createTextOnlyBtn:(NSString *)title color:(UIColor *)color sel:(SEL)sel {
   UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-
-  if (@available(iOS 15.0, *)) {
-    UIButtonConfiguration *conf =
-        [UIButtonConfiguration filledButtonConfiguration];
-    conf.baseBackgroundColor = [color colorWithAlphaComponent:0.15];
-    conf.baseForegroundColor = color;
-    conf.title = title;
-    conf.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    conf.contentInsets = NSDirectionalEdgeInsetsMake(0, 4, 0, 4);
-
-    conf.titleTextAttributesTransformer =
-        ^NSDictionary<NSAttributedStringKey, id> *_Nonnull(
-            NSDictionary<NSAttributedStringKey, id> *_Nonnull incoming) {
-      NSMutableDictionary *outgoing = [incoming mutableCopy];
-      outgoing[NSFontAttributeName] =
-          [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
-      return outgoing;
-    };
-    btn.configuration = conf;
-  } else {
-    [btn setTitle:title forState:UIControlStateNormal];
-    [btn setTitleColor:color forState:UIControlStateNormal];
-    btn.backgroundColor = [color colorWithAlphaComponent:0.15];
-    btn.layer.cornerRadius = 8;
-    btn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-  }
-
+  [btn setTitle:title forState:UIControlStateNormal];
+  btn.tintColor = sel == @selector(handleReset) ? UIColor.systemRedColor : [VMUIHelper accentColor];
+  [VMUIHelper styleButton:btn primary:NO];
+  if (sel == @selector(handleReset)) [btn setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
+  btn.accessibilityLabel = title;
   [btn addTarget:self action:sel forControlEvents:UIControlEventTouchUpInside];
   return btn;
 }
@@ -482,7 +524,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 - (UIView *)buildFilterPanel {
   UIView *panel = [[UIView alloc] init];
   panel.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-  panel.layer.cornerRadius = 10;
+  [VMUIHelper styleCard:panel];
   panel.clipsToBounds = YES;
 
   self.segFilterMode = [[UISegmentedControl alloc] initWithItems:@[
@@ -505,7 +547,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.tfFilter2 = [self createSmallTF:TR(@"Filter_Input_Max")];
   UIButton *btnApply = [UIButton buttonWithType:UIButtonTypeSystem];
   [btnApply setTitle:TR(@"Filter_Apply") forState:UIControlStateNormal];
-  btnApply.backgroundColor = [UIColor systemOrangeColor];
+  btnApply.backgroundColor = [VMUIHelper filledColorForTint:UIColor.systemOrangeColor];
   [btnApply setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
   btnApply.layer.cornerRadius = 6;
   [btnApply.widthAnchor constraintEqualToConstant:70].active = YES;
@@ -520,8 +562,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       constraintEqualToAnchor:self.tfFilter2.widthAnchor]
       .active = YES;
 
+  NSLayoutConstraint *panelHeight = [panel.heightAnchor constraintEqualToConstant:112];
+  panelHeight.priority = 999;
+  panelHeight.active = YES;
   [NSLayoutConstraint activateConstraints:@[
-    [panel.heightAnchor constraintEqualToConstant:90],
     [self.segFilterMode.topAnchor constraintEqualToAnchor:panel.topAnchor
                                                  constant:8],
     [self.segFilterMode.leadingAnchor
@@ -536,9 +580,13 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                            constant:8],
     [inputRow.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor
                                             constant:-8],
-    [inputRow.heightAnchor constraintEqualToConstant:32]
+    [inputRow.heightAnchor constraintEqualToConstant:44]
   ]];
 
+  [VMUIHelper styleTextField:self.tfFilter1];
+  [VMUIHelper styleTextField:self.tfFilter2];
+  btnApply.tintColor = [VMUIHelper accentColor];
+  [VMUIHelper styleButton:btnApply primary:YES];
   [self filterModeChanged];
   return panel;
 }
@@ -561,7 +609,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [NSLayoutConstraint activateConstraints:@[
     [self.floatingToolBar.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
     [self.floatingToolBar.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
-    [self.floatingToolBar.heightAnchor constraintEqualToConstant:44]
+    [self.floatingToolBar.heightAnchor constraintEqualToConstant:60]
   ]];
   
   self.toolBarTopConstraint = [self.floatingToolBar.topAnchor constraintEqualToAnchor:g.topAnchor constant:-60];
@@ -580,15 +628,15 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   stack.distribution = UIStackViewDistributionFillEqually;
   stack.spacing = 6;
   stack.translatesAutoresizingMaskIntoConstraints = NO;
-  [contentView addSubview:stack];
-  
+  UIScrollView *strip = [self horizontalStripForView:stack minimumWidth:480 height:44];
+  strip.translatesAutoresizingMaskIntoConstraints = NO;
+  [contentView addSubview:strip];
   [NSLayoutConstraint activateConstraints:@[
-    [stack.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:4],
-    [stack.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-4],
-    [stack.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:8],
-    [stack.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-8]
+    [strip.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:8],
+    [strip.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-8],
+    [strip.centerYAnchor constraintEqualToAnchor:contentView.centerYAnchor]
   ]];
-  
+
   UIButton *btnRefresh = [self createFloatingToolBtn:TR(@"Mod_Results_Refreshed")
                                                color:[UIColor systemTealColor]
                                                  sel:@selector(doRefreshValues)];
@@ -611,43 +659,15 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   btnBatch.tag = 2004;
   btnReset.tag = 2005;
   
+  [stack addArrangedSubview:btnReset];
   [stack addArrangedSubview:btnRefresh];
   [stack addArrangedSubview:btnNearby];
   [stack addArrangedSubview:btnFilter];
   [stack addArrangedSubview:btnBatch];
-  [stack addArrangedSubview:btnReset];
 }
 
-- (UIButton *)createFloatingToolBtn:(NSString *)title
-                              color:(UIColor *)color
-                                sel:(SEL)sel {
-  UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-  
-  if (@available(iOS 15.0, *)) {
-    UIButtonConfiguration *conf = [UIButtonConfiguration filledButtonConfiguration];
-    conf.baseBackgroundColor = [color colorWithAlphaComponent:0.15];
-    conf.baseForegroundColor = color;
-    conf.title = title;
-    conf.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    conf.contentInsets = NSDirectionalEdgeInsetsMake(0, 2, 0, 2);
-    
-    conf.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey, id> *_Nonnull(
-        NSDictionary<NSAttributedStringKey, id> *_Nonnull incoming) {
-      NSMutableDictionary *outgoing = [incoming mutableCopy];
-      outgoing[NSFontAttributeName] = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
-      return outgoing;
-    };
-    btn.configuration = conf;
-  } else {
-    [btn setTitle:title forState:UIControlStateNormal];
-    [btn setTitleColor:color forState:UIControlStateNormal];
-    btn.backgroundColor = [color colorWithAlphaComponent:0.15];
-    btn.layer.cornerRadius = 6;
-    btn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
-  }
-  
-  [btn addTarget:self action:sel forControlEvents:UIControlEventTouchUpInside];
-  return btn;
+- (UIButton *)createFloatingToolBtn:(NSString *)title color:(UIColor *)color sel:(SEL)sel {
+  return [self createTextOnlyBtn:title color:color sel:sel];
 }
 
 - (void)setupFloatingBatchContent {
@@ -659,23 +679,15 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   
   self.batchStackView.distribution = UIStackViewDistributionFill;
   self.batchStackView.translatesAutoresizingMaskIntoConstraints = NO;
-  [contentView addSubview:self.batchStackView];
-
-  [self.batchStackView.centerYAnchor
-      constraintEqualToAnchor:contentView.centerYAnchor]
-      .active = YES;
-  [self.batchStackView.heightAnchor
-      constraintEqualToAnchor:contentView.heightAnchor]
-      .active = YES;
-
-  [self.batchStackView.leadingAnchor
-      constraintEqualToAnchor:contentView.leadingAnchor
-                     constant:15]
-      .active = YES;
-  [self.batchStackView.trailingAnchor
-      constraintEqualToAnchor:contentView.trailingAnchor
-                     constant:-15]
-      .active = YES;
+  self.batchStackView.spacing = 8;
+  UIScrollView *strip = [self horizontalStripForView:self.batchStackView minimumWidth:356 height:44];
+  strip.translatesAutoresizingMaskIntoConstraints = NO;
+  [contentView addSubview:strip];
+  [NSLayoutConstraint activateConstraints:@[
+    [strip.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:8],
+    [strip.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-8],
+    [strip.centerYAnchor constraintEqualToAnchor:contentView.centerYAnchor]
+  ]];
 
   UIButton *btnAll = [self createIconOnlyBtn:@"checkmark.circle"
                                        color:[UIColor systemBlueColor]
@@ -714,40 +726,22 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [self.batchStackView addArrangedSubview:btnDel];
 }
 
-- (UIButton *)createIconOnlyBtn:(NSString *)iconName
-                          color:(UIColor *)color
-                            sel:(SEL)sel {
+- (UIButton *)createIconOnlyBtn:(NSString *)iconName color:(UIColor *)color sel:(SEL)sel {
   UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-
-  UIImage *iconImage = [VMIconHelper compatibleSystemImageNamed:iconName];
-
-  if (@available(iOS 15.0, *)) {
-    UIButtonConfiguration *conf =
-        [UIButtonConfiguration plainButtonConfiguration];
-    conf.baseForegroundColor = color;
-
-    conf.image = iconImage;
-
-    UIImageSymbolConfiguration *sym = [UIImageSymbolConfiguration
-        configurationWithPointSize:26
-                            weight:UIImageSymbolWeightSemibold
-                             scale:UIImageSymbolScaleMedium];
-    conf.preferredSymbolConfigurationForImage = sym;
-
-    conf.contentInsets = NSDirectionalEdgeInsetsMake(10, 10, 10, 10);
-
-    btn.configuration = conf;
-  } else {
-    UIImageSymbolConfiguration *sym = [UIImageSymbolConfiguration
-        configurationWithPointSize:26
-                            weight:UIImageSymbolWeightSemibold];
-    UIImage *configuredImage =
-        [iconImage imageByApplyingSymbolConfiguration:sym];
-    [btn setImage:configuredImage forState:UIControlStateNormal];
-    btn.tintColor = color;
-    btn.contentEdgeInsets = UIEdgeInsetsMake(10, 10, 10, 10);
-  }
-
+  [btn setImage:[VMIconHelper compatibleSystemImageNamed:iconName] forState:UIControlStateNormal];
+  btn.tintColor = sel == @selector(batchDeleteResultsAction) ? UIColor.systemRedColor : [VMUIHelper accentColor];
+  [btn.widthAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [btn.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  NSDictionary *labels = @{
+    NSStringFromSelector(@selector(batchSelectAll)): TR(@"Batch_Sel_All"),
+    NSStringFromSelector(@selector(batchRangeSelectAction)): TR(@"Btn_Batch_Select"),
+    NSStringFromSelector(@selector(batchCopyAddressAction)): TR(@"Pop_Copy_Addr"),
+    NSStringFromSelector(@selector(batchLockAction)): TR(@"Act_Lock"),
+    NSStringFromSelector(@selector(batchFavAction)): TR(@"Act_Favorite"),
+    NSStringFromSelector(@selector(batchModifyAction)): TR(@"Batch_Mod_Sel"),
+    NSStringFromSelector(@selector(batchDeleteResultsAction)): TR(@"Act_Delete")
+  };
+  btn.accessibilityLabel = labels[NSStringFromSelector(sel)];
   [btn addTarget:self action:sel forControlEvents:UIControlEventTouchUpInside];
   return btn;
 }
@@ -759,19 +753,19 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   BOOL canOperate = hasResults && !self.isScanning;
 
   self.btnRefresh.enabled = canOperate;
-  self.btnRefresh.alpha = canOperate ? 1.0 : 0.5;
+  self.btnRefresh.alpha = 1.0;
 
   self.btnNearby.enabled = canOperate;
   self.btnFilter.enabled = canOperate;
   self.btnBatch.enabled = canOperate;
 
-  self.btnNearby.alpha = canOperate ? 1.0 : 0.5;
-  self.btnFilter.alpha = canOperate ? 1.0 : 0.5;
-  self.btnBatch.alpha = canOperate ? 1.0 : 0.5;
+  self.btnNearby.alpha = 1.0;
+  self.btnFilter.alpha = 1.0;
+  self.btnBatch.alpha = 1.0;
 
   self.btnReset.enabled =
-      !self.isScanning && (hasResults || self.inputField.text.length > 0 || self.isFuzzyLocked);
-  self.btnReset.alpha = self.btnReset.enabled ? 1.0 : 0.5;
+      !self.isScanning && (hasResults || self.pinnedResults.count > 0 || self.inputField.text.length > 0 || self.isFuzzyLocked || self.isNextScan);
+  self.btnReset.alpha = 1.0;
   
   if (self.isToolBarVisible) {
     [self syncFloatingToolBarState];
@@ -779,38 +773,9 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (void)updateTableHeaderHeight:(UIView *)header {
-  if (!header)
-    return;
-
-  CGFloat width = self.tableView.bounds.size.width;
-  if (width <= 0)
-    width = [UIScreen mainScreen].bounds.size.width;
-
-  for (NSLayoutConstraint *c in header.constraints) {
-    if (c.firstAttribute == NSLayoutAttributeWidth) {
-      [header removeConstraint:c];
-    }
-  }
-
-  NSLayoutConstraint *widthConstraint =
-      [header.widthAnchor constraintEqualToConstant:width];
-  widthConstraint.active = YES;
-
-  [header setNeedsLayout];
-  [header layoutIfNeeded];
-
-  CGSize size =
-      [header systemLayoutSizeFittingSize:UILayoutFittingCompressedSize];
-
-  widthConstraint.active = NO;
-
-  CGRect frame = header.frame;
-  frame.size.height = size.height;
-  if (size.height == 0)
-    frame.size.height = 100;
-  header.frame = frame;
-
-  self.tableView.tableHeaderView = header;
+  if (!header) return;
+  if (self.tableView.tableHeaderView != header) self.tableView.tableHeaderView = header;
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
 }
 
 - (UIButton *)createButton:(NSString *)title
@@ -819,7 +784,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
   [btn setTitle:title forState:UIControlStateNormal];
   [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-  btn.backgroundColor = color;
+  btn.backgroundColor = [VMUIHelper filledColorForTint:color];
   btn.layer.cornerRadius = 8;
   btn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
   [btn addTarget:self
@@ -878,7 +843,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     self.dataTypeSegment.selectedSegmentIndex = VMDataTypeInt32;
   }
   [self.inputField reloadInputViews];
-
+  [self updateButtonStates];
   [self updateTableHeaderHeight:self.tableView.tableHeaderView];
 }
 
@@ -1040,6 +1005,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [self.searchBtn addSubview:self.btnSpinner];
   [self.btnSpinner startAnimating];
   self.statusLabel.text = [NSString stringWithFormat:TR(@"Fuz_Repeat_Running"), 0L, (long)total];
+  [self updateTableHeaderHeight:self.tableView.tableHeaderView];
 }
 
 - (void)endFuzzyRepeatUIWithCompleted:(NSInteger)completed
@@ -1053,6 +1019,11 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.isScanning = NO;
   self.view.userInteractionEnabled = YES;
   self.fuzzySegRow1.selectedSegmentIndex = UISegmentedControlNoSegment;
+  if (count == 0) {
+    [self handleZeroResults];
+    [self showWeakToast:TR(@"Msg_Search_No_Res")];
+    return;
+  }
   [self updateButtonStates];
   [self.tableView reloadData];
   [self updateResultInfo];
@@ -1069,6 +1040,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   NSString *msg = [NSString stringWithFormat:TR(@"Fuz_Repeat_Done"),
                                              (long)completed, (long)total];
   self.statusLabel.text = msg;
+  [self updateTableHeaderHeight:self.tableView.tableHeaderView];
   [self showWeakToast:msg];
   UINotificationFeedbackGenerator *gen = [[UINotificationFeedbackGenerator alloc] init];
   [gen notificationOccurred:success ? UINotificationFeedbackTypeSuccess
@@ -1088,7 +1060,9 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                    total:(NSInteger)total
                                completed:(NSInteger)completed
                                lastCount:(NSUInteger)lastCount {
-  if (completed >= total || lastCount == 0) {
+  // The initial snapshot has candidates before resultCount is populated.
+  // Always run its first comparison, then stop as soon as a pass returns zero.
+  if (completed >= total || (completed > 0 && lastCount == 0)) {
     [self endFuzzyRepeatUIWithCompleted:completed
                                   total:total
                                   count:lastCount
@@ -1150,11 +1124,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       [UIColor secondarySystemGroupedBackgroundColor];
   self.toolbarContainer.layer.cornerRadius = 12;
   self.toolbarContainer.layer.borderWidth = 0.5;
-  if (@available(iOS 13.0, *)) {
-    self.toolbarContainer.layer.borderColor = [UIColor separatorColor].CGColor;
-  } else {
-    self.toolbarContainer.layer.borderColor = [UIColor lightGrayColor].CGColor;
-  }
+  self.toolbarContainer.layer.borderColor = [UIColor.separatorColor resolvedColorWithTraitCollection:self.traitCollection].CGColor;
 
   [self.headerStackView addArrangedSubview:self.toolbarContainer];
 
@@ -1268,7 +1238,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.tfFilter2 = [self createSmallTF:TR(@"Filter_Input_Max")];
   UIButton *btnApply = [UIButton buttonWithType:UIButtonTypeSystem];
   [btnApply setTitle:TR(@"Filter_Apply") forState:UIControlStateNormal];
-  btnApply.backgroundColor = [UIColor systemOrangeColor];
+  btnApply.backgroundColor = [VMUIHelper filledColorForTint:UIColor.systemOrangeColor];
   [btnApply setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
   btnApply.layer.cornerRadius = 6;
   [btnApply.widthAnchor constraintEqualToConstant:70].active = YES;
@@ -1359,7 +1329,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
   [btn setTitle:title forState:UIControlStateNormal];
   [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-  btn.backgroundColor = color;
+  btn.backgroundColor = [VMUIHelper filledColorForTint:color];
 
   btn.layer.cornerRadius = 8;
   btn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
@@ -1386,18 +1356,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   BOOL shouldShow = self.filterPanelView.hidden;
   self.filterPanelView.hidden = !shouldShow;
 
-  if (@available(iOS 15.0, *)) {
-    UIButtonConfiguration *conf = self.btnFilter.configuration;
-    if (!self.filterPanelView.hidden) {
-      conf.baseBackgroundColor = [UIColor systemOrangeColor];
-      conf.baseForegroundColor = [UIColor whiteColor];
-    } else {
-      conf.baseBackgroundColor =
-          [[UIColor systemOrangeColor] colorWithAlphaComponent:0.15];
-      conf.baseForegroundColor = [UIColor systemOrangeColor];
-    }
-    self.btnFilter.configuration = conf;
-  }
+  [VMUIHelper styleButton:self.btnFilter primary:shouldShow];
 
   [self.headerMainStack layoutIfNeeded];
   [self.tableView.tableHeaderView layoutIfNeeded];
@@ -1563,31 +1522,39 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 - (void)handleZeroResults {
   [[VMMemoryEngine shared] clearSession];
-
+  self.isScanning = NO;
   self.isNextScan = NO;
-  [self.searchBtn setTitle:TR(@"Mod_Search_First")
-                  forState:UIControlStateNormal];
-  self.nearbyBtn.hidden = YES;
-  if (self.searchModeSegment.selectedSegmentIndex == 1) {
-    self.inputField.hidden = YES;
-    self.fuzzySegRow1.hidden = YES;
-    self.fuzzySegRow2.hidden = YES;
-    self.fuzzyHintLabel.hidden = YES;
-  } else {
-    self.inputField.hidden = NO;
-    self.fuzzySegRow1.hidden = YES;
-    self.fuzzySegRow2.hidden = YES;
-    self.fuzzyHintLabel.hidden = YES;
-  }
+  self.isFuzzyLocked = NO;
+  self.fuzzySearchCount = 0;
+  [self.searchModeSegment setEnabled:YES forSegmentAtIndex:0];
+  [self.searchModeSegment setEnabled:YES forSegmentAtIndex:2];
+  [self.btnSpinner stopAnimating];
+  [self.btnSpinner removeFromSuperview];
+  self.searchBtn.enabled = YES;
+  self.view.userInteractionEnabled = YES;
+  [self.searchBtn setTitle:TR(@"Mod_Search_First") forState:UIControlStateNormal];
+  self.btnNearby.hidden = YES;
+  self.inputField.hidden = self.searchModeSegment.selectedSegmentIndex == VMSearchModeFuzzy;
+  self.fuzzySegRow1.selectedSegmentIndex = 3;
+  self.fuzzySegRow2.selectedSegmentIndex = UISegmentedControlNoSegment;
+  self.fuzzySegRow1.hidden = YES;
+  self.fuzzySegRow2.hidden = YES;
+  self.fuzzyHintLabel.hidden = YES;
+  self.filterPanelView.hidden = YES;
+  [VMUIHelper styleButton:self.btnFilter primary:NO];
 
   self.statusLabel.text =
       [NSString stringWithFormat:@"%@: 0. %@", TR(@"Mod_Results_Count"),
                                  TR(@"Msg_Search_Zero_Hint")];
+  self.statusLabel.textColor = UIColor.secondaryLabelColor;
+  if (self.isMultiSelectMode) [self exitBatchMode];
+  [self.selectedItems removeAllObjects];
   [self.tableView reloadData];
-  [self updateResultInfo];
   [self updateEmptyState];
-  if (self.isMultiSelectMode)
-    [self exitBatchMode];
+  [self updateButtonStates];
+  // Collapsing arranged subviews must also shrink the table's explicit header
+  // frame, otherwise its remaining space stretches the attached-process card.
+  [self updateTableHeaderHeight:self.tableView.tableHeaderView];
 }
 
 - (void)performLegacyFuzzySearch:(NSString *)valStr type:(VMDataType)type fuzzyType:(VMFuzzyType)fType {
@@ -1821,6 +1788,9 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
           self.view.userInteractionEnabled = YES;
           
           if (!success) {
+            [self.searchBtn setTitle:TR(@"Mod_Search_First") forState:UIControlStateNormal];
+            self.statusLabel.text = msg.length ? msg : TR(@"Msg_Snapshot_Failed");
+            [self updateTableHeaderHeight:self.tableView.tableHeaderView];
             [self showToast:msg];
             UINotificationFeedbackGenerator *failGen = [[UINotificationFeedbackGenerator alloc] init];
             [failGen notificationOccurred:UINotificationFeedbackTypeError];
@@ -1830,6 +1800,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
           UINotificationFeedbackGenerator *successGen = [[UINotificationFeedbackGenerator alloc] init];
           [successGen notificationOccurred:UINotificationFeedbackTypeSuccess];
           
+          if (addressCount == 0) {
+            [self handleZeroResults];
+            return;
+          }
           self.isFuzzyLocked = YES;
           self.fuzzySearchCount = 1;
           [self.searchModeSegment setEnabled:NO forSegmentAtIndex:0]; 
@@ -1856,7 +1830,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
           [self.fuzzySegRow1 setEnabled:NO forSegmentAtIndex:2];
           
           [self fuzzyTypeChanged];
-          
+          [self updateButtonStates];
+          [self updateEmptyState];
           [self updateTableHeaderHeight:self.tableView.tableHeaderView];
         });
       }];
@@ -2072,6 +2047,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.btnNearby.hidden = YES;
 
   dispatch_async(dispatch_get_main_queue(), ^{
+    [self refreshProcessHeader];
     self.inputField.text = @"";
     if (self.searchModeSegment.selectedSegmentIndex == 1) {
       self.fuzzySegRow1.selectedSegmentIndex = 3;
@@ -2089,6 +2065,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     [self.searchBtn setTitle:TR(@"Mod_Search_First")
                     forState:UIControlStateNormal];
     self.statusLabel.text = TR(@"Mod_Status_Ready");
+    self.filterPanelView.hidden = YES;
+    [VMUIHelper styleButton:self.btnFilter primary:NO];
     if (self.isMultiSelectMode)
       [self exitBatchMode];
     self.tableView.tableFooterView = nil;
@@ -2099,6 +2077,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
     [self updateGroupHelpButtonState:(self.searchModeSegment
                                           .selectedSegmentIndex == 2)];
+    [self updateTableHeaderHeight:self.tableView.tableHeaderView];
   });
 }
 
@@ -2384,7 +2363,11 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 - (CGFloat)tableView:(UITableView *)tableView
     heightForHeaderInSection:(NSInteger)section {
-  return 0;
+  return CGFLOAT_MIN;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {
+  return CGFLOAT_MIN;
 }
 
 - (UIButton *)createHeaderBtn:(NSString *)title
@@ -2434,7 +2417,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
   self.navigationItem.rightBarButtonItem =
       [[UIBarButtonItem alloc] initWithTitle:TR(@"Btn_Cancel")
-                                       style:UIBarButtonItemStyleDone
+                                       style:UIBarButtonItemStylePlain
                                       target:self
                                       action:@selector(exitBatchMode)];
   self.navigationItem.leftBarButtonItem = nil;
@@ -2458,6 +2441,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                    }
                    completion:nil];
 
+  [self.tabBarController.view setNeedsLayout];
   if (!self.filterPanelView.hidden)
     [self toggleFilterPanel];
 }
@@ -2503,6 +2487,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       }
       completion:^(BOOL finished) {
         self.floatingBatchBar.hidden = YES;
+        [self.tabBarController.view setNeedsLayout];
       }];
 
   [self updateButtonStates];
@@ -2531,25 +2516,18 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   }
 }
 
+- (void)resetGlobalBatchSelection {
+  self.isGlobalSelectAll = NO;
+  UIButton *btnAll = [self.floatingBatchBar.contentView viewWithTag:101];
+  [btnAll setImage:[UIImage systemImageNamed:@"checkmark.circle"]
+          forState:UIControlStateNormal];
+}
+
 - (void)batchModifyAction {
-  NSMutableArray *items = nil;
-
-  if (!self.isGlobalSelectAll) {
-    NSArray *paths = [self.tableView indexPathsForSelectedRows];
-    if (!paths || paths.count == 0) {
-      [self showToast:TR(@"Msg_No_Sel")];
-      return;
-    }
-
-    items = [NSMutableArray array];
-    VMDataType type = (VMDataType)self.dataTypeSegment.selectedSegmentIndex;
-    for (NSIndexPath *p in paths) {
-      VMScanResultItem *itm =
-          [[VMMemoryEngine shared] getResultItemAtIndex:p.row dataType:type];
-      if (itm)
-        [items addObject:itm];
-    }
-  } else {
+  NSArray<VMScanResultItem *> *items = [self batchModificationItems];
+  if (items && items.count == 0) {
+    [self showToast:TR(@"Msg_No_Sel")];
+    return;
   }
 
   NSString *countStr =
@@ -2586,6 +2564,19 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
         CGRectMake(self.view.center.x, self.view.center.y, 1, 1);
   }
   [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (NSArray<VMScanResultItem *> *)batchModificationItems {
+  if (self.isGlobalSelectAll) return nil;
+
+  NSMutableArray<VMScanResultItem *> *items = [NSMutableArray array];
+  NSArray<NSIndexPath *> *paths = [[self.tableView indexPathsForSelectedRows]
+      sortedArrayUsingSelector:@selector(compare:)];
+  for (NSIndexPath *path in paths) {
+    VMScanResultItem *item = [self getItemAtIndexPath:path];
+    if (item) [items addObject:item];
+  }
+  return items;
 }
 
 - (void)showBatchInputMode:(int)mode items:(NSArray *)items {
@@ -2846,6 +2837,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
   if (scrollView != self.tableView) return;
+  if ([self.tabBarController isKindOfClass:VMRootViewController.class])
+    [(VMRootViewController *)self.tabBarController refreshBrandingOverlay];
   
   if (!self.toolRowInHeader) return;
   
@@ -2959,7 +2952,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   static NSString *cid = @"rescell";
   UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cid];
   if (!cell) {
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                   reuseIdentifier:cid];
     cell.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
   }
@@ -3062,23 +3055,26 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
   cell.textLabel.font =
       [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightRegular];
-  cell.detailTextLabel.font =
-      [UIFont monospacedDigitSystemFontOfSize:14 weight:UIFontWeightMedium];
+  cell.detailTextLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody]
+      scaledFontForFont:[UIFont monospacedSystemFontOfSize:17 weight:UIFontWeightSemibold]];
+  cell.textLabel.adjustsFontForContentSizeCategory = YES;
+  cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
+  cell.detailTextLabel.numberOfLines = 0;
+  cell.accessoryType = tableView.isEditing ? UITableViewCellAccessoryNone : UITableViewCellAccessoryDisclosureIndicator;
+  cell.accessibilityLabel = [NSString stringWithFormat:@"%@, %@", cell.textLabel.text, cell.detailTextLabel.text];
 
   return cell;
 }
 
 - (void)tableView:(UITableView *)tableView
+    didDeselectRowAtIndexPath:(NSIndexPath *)indexPath {
+  if (tableView.isEditing) [self resetGlobalBatchSelection];
+}
+
+- (void)tableView:(UITableView *)tableView
     didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
   if (tableView.isEditing) {
-    if (self.isGlobalSelectAll) {
-      self.isGlobalSelectAll = NO;
-      UIView *header = [self.tableView headerViewForSection:0];
-      UIButton *btnAll = [header viewWithTag:101];
-      [btnAll setTitle:TR(@"Batch_Sel_All") forState:UIControlStateNormal];
-      UIButton *btnMod = [header viewWithTag:102];
-      [btnMod setTitle:TR(@"Batch_Mod_Sel") forState:UIControlStateNormal];
-    }
+    [self resetGlobalBatchSelection];
     return;
   }
 
@@ -3156,6 +3152,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                 [[VMScanResultItem alloc] init];
                             newItem.address = item.address;
                             newItem.valueStr = item.valueStr;
+                            newItem.type = item.type;
                             [self.pinnedResults addObject:newItem];
                           }
                           [self.tableView reloadData];
@@ -3251,7 +3248,30 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   if (engineCount == 0 && pinnedCount == 0) {
     self.toolbarStackView.hidden = YES;
 
-    self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+    BOOL connected = [VMMemoryEngine shared].targetPid > 0;
+    UIView *footer = nil;
+    if (!connected) {
+      UIButton *connect = [UIButton buttonWithType:UIButtonTypeSystem];
+      connect.accessibilityIdentifier = @"vmBrandingAvoidance";
+      [connect setTitle:TR(@"Act_Attach") forState:UIControlStateNormal];
+      connect.tintColor = [VMUIHelper accentColor];
+      [VMUIHelper styleButton:connect primary:NO];
+      connect.translatesAutoresizingMaskIntoConstraints = NO;
+      [connect addTarget:self action:@selector(openProcessSelection) forControlEvents:UIControlEventTouchUpInside];
+      footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.tableView.bounds.size.width, 60)];
+      [footer addSubview:connect];
+      [NSLayoutConstraint activateConstraints:@[
+        [connect.topAnchor constraintEqualToAnchor:footer.topAnchor constant:4],
+        [connect.centerXAnchor constraintEqualToAnchor:footer.centerXAnchor],
+        [connect.leadingAnchor constraintGreaterThanOrEqualToAnchor:footer.leadingAnchor constant:16],
+        [connect.trailingAnchor constraintLessThanOrEqualToAnchor:footer.trailingAnchor constant:-16],
+        [connect.bottomAnchor constraintEqualToAnchor:footer.bottomAnchor constant:-12],
+        [connect.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+        [connect.widthAnchor constraintGreaterThanOrEqualToConstant:132]
+      ]];
+    }
+    self.tableView.tableFooterView = footer;
+    [VMUIHelper sizeFooterToFitTableView:self.tableView];
   } else {
     self.toolbarStackView.hidden = NO;
     self.tableView.tableFooterView = nil;
@@ -3264,6 +3284,17 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       self.statusLabel.text =
           [NSString stringWithFormat:@"%@: %lu", TR(@"Mod_Results_Count"),
                                      (unsigned long)engineCount];
+    }
+  }
+  if ([self.tabBarController isKindOfClass:VMRootViewController.class])
+    [(VMRootViewController *)self.tabBarController refreshBrandingOverlay];
+}
+
+- (void)openProcessSelection {
+  for (UIViewController *page in self.tabBarController.viewControllers) {
+    if (page.tabBarItem.tag == 0) {
+      self.tabBarController.selectedViewController = page;
+      return;
     }
   }
 }
@@ -3584,6 +3615,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                            target:textField
                            action:@selector(resignFirstResponder)];
   toolbar.items = @[ flex, done ];
+  [VMUIHelper styleConfirmationItem:done];
   textField.inputAccessoryView = toolbar;
 }
 
@@ -3597,8 +3629,9 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     UIButton *infoBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     [infoBtn setImage:[UIImage systemImageNamed:@"info.circle"]
              forState:UIControlStateNormal];
-    infoBtn.tintColor = [UIColor systemBlueColor];
-    infoBtn.frame = CGRectMake(0, 0, 30, 30);
+    infoBtn.tintColor = [VMUIHelper accentColor];
+    infoBtn.accessibilityLabel = show ? TR(@"Mod_Mode_Group") : TR(@"Mod_Mode_Exact");
+    infoBtn.frame = CGRectMake(0, 0, 44, 44);
     infoBtn.contentEdgeInsets = UIEdgeInsetsMake(0, 0, 0, 8);
 
     SEL helpSel = show ? @selector(showGroupHelpAlert) : @selector(showExactHelpAlert);
@@ -3638,6 +3671,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                   value:[UIFont systemFontOfSize:13]
                   range:NSMakeRange(0, msg.length)];
 
+  [attrStr addAttribute:NSForegroundColorAttributeName value:UIColor.labelColor range:NSMakeRange(0, msg.length)];
   [alert setValue:attrStr forKey:@"attributedMessage"];
 
   [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_OK")
@@ -3671,6 +3705,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                   value:[UIFont systemFontOfSize:13]
                   range:NSMakeRange(0, msg.length)];
 
+  [attrStr addAttribute:NSForegroundColorAttributeName value:UIColor.labelColor range:NSMakeRange(0, msg.length)];
   [alert setValue:attrStr forKey:@"attributedMessage"];
 
   [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_OK")
@@ -3681,94 +3716,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (void)updateBatchBarStyle {
-  if (!self.batchStackView)
-    return;
-
-  CGFloat screenWidth = self.view.bounds.size.width;
-  CGFloat screenHeight = self.view.bounds.size.height;
-  BOOL isLandscape = screenWidth > screenHeight;
-
-  CGFloat pointSize;
-  CGFloat padding;
-
-  if (isLandscape) {
-    pointSize = 24.0; 
-    padding = 10.0;
-  } else {
-    
-    if (screenWidth < 350) { 
-      pointSize = 18.0;
-      padding = 4.0;
-    } else {
-      pointSize = 22.0;
-      padding = 8.0;
-    }
-  }
-
-  if (isLandscape) {
-    
-    if (self.batchStackView.distribution != UIStackViewDistributionFill) {
-      self.batchStackView.distribution = UIStackViewDistributionFill;
-    }
-    self.batchStackView.spacing = 30.0; 
-
-    if (screenWidth > 800)
-      self.batchStackView.spacing = 50.0;
-
-  } else {
-    
-    if (self.batchStackView.distribution !=
-        UIStackViewDistributionEqualSpacing) {
-      self.batchStackView.distribution = UIStackViewDistributionEqualSpacing;
-    }
-    self.batchStackView.spacing =
-        0; 
-  }
-
-  UIImageSymbolScale iconScale =
-      isLandscape ? UIImageSymbolScaleMedium : UIImageSymbolScaleSmall;
-
-  if (@available(iOS 15.0, *)) {
-    UIImageSymbolConfiguration *sym = [UIImageSymbolConfiguration
-        configurationWithPointSize:pointSize
-                            weight:UIImageSymbolWeightSemibold
-                             scale:iconScale];
-
-    for (UIView *view in self.batchStackView.arrangedSubviews) {
-      if ([view isKindOfClass:[UIButton class]]) {
-        UIButton *btn = (UIButton *)view;
-        UIButtonConfiguration *conf = btn.configuration;
-
-        if (conf.preferredSymbolConfigurationForImage != sym ||
-            conf.contentInsets.top != padding) {
-          conf.preferredSymbolConfigurationForImage = sym;
-          conf.contentInsets =
-              NSDirectionalEdgeInsetsMake(padding, padding, padding, padding);
-          btn.configuration = conf;
-        }
-      }
-    }
-  } else {
-    
-    UIImageSymbolConfiguration *sym = [UIImageSymbolConfiguration
-        configurationWithPointSize:pointSize
-                            weight:UIImageSymbolWeightSemibold
-                             scale:iconScale];
-    for (UIView *view in self.batchStackView.arrangedSubviews) {
-      if ([view isKindOfClass:[UIButton class]]) {
-        UIButton *btn = (UIButton *)view;
-        btn.contentEdgeInsets =
-            UIEdgeInsetsMake(padding, padding, padding, padding);
-        if (btn.currentImage) {
-          [btn
-              setImage:[btn.currentImage imageByApplyingSymbolConfiguration:sym]
-              forState:UIControlStateNormal];
-        }
-      }
-    }
-  }
-
-  [self.floatingBatchBar layoutIfNeeded];
+  self.batchStackView.distribution = UIStackViewDistributionFillEqually;
+  self.batchStackView.spacing = 8;
 }
 
 #pragma mark - Auto Reconnect (v2.5)

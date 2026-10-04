@@ -1,3 +1,4 @@
+#import "../../utils/helpers/VMUIHelper.h"
 #import "VMPointerLockCell.h"
 #import "../../../include/VMLocalization.h"
 #import <objc/runtime.h>
@@ -7,6 +8,7 @@
 
 @interface VMPointerLockCell ()
 @property(nonatomic, strong) UIView *cardContainer;
+@property(nonatomic, strong) UIColor *cardBorderColor;
 @property(nonatomic, strong) UIView *statusIndicator;
 @property(nonatomic, strong) UILabel *titleLabel;
 @property(nonatomic, strong) UILabel *authorLabel;
@@ -54,30 +56,46 @@
                                 : UITableViewCellSelectionStyleNone;
 }
 
+- (void)setCardBorderColor:(UIColor *)color {
+  _cardBorderColor = color;
+  self.cardContainer.layer.borderColor = [color resolvedColorWithTraitCollection:self.traitCollection].CGColor;
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
+  if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+    self.cardBorderColor = self.cardBorderColor ?: UIColor.clearColor;
+  }
+}
+
 - (void)setupUI {
   _cardContainer = [[UIView alloc] init];
   _cardContainer.backgroundColor =
       [UIColor secondarySystemGroupedBackgroundColor];
-  _cardContainer.layer.cornerRadius = kCardCornerRadius;
+  [VMUIHelper styleCard:_cardContainer];
   _cardContainer.layer.shadowColor = [UIColor blackColor].CGColor;
-  _cardContainer.layer.shadowOpacity = 0.06;
+  _cardContainer.layer.shadowOpacity = 0;
   _cardContainer.layer.shadowOffset = CGSizeMake(0, 3);
   _cardContainer.layer.shadowRadius = 6;
   _cardContainer.layer.borderWidth = 1.0;
-  _cardContainer.layer.borderColor = [UIColor clearColor].CGColor;
+  self.cardBorderColor = UIColor.clearColor;
   _cardContainer.translatesAutoresizingMaskIntoConstraints = NO;
   [self.contentView addSubview:_cardContainer];
 
   _titleLabel = [[UILabel alloc] init];
-  _titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+  _titleLabel.font = [VMUIHelper scaledFontOfSize:17 weight:UIFontWeightSemibold];
+  _titleLabel.adjustsFontForContentSizeCategory = YES;
+  _titleLabel.numberOfLines = 0;
   _titleLabel.textColor = [UIColor labelColor];
   _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [_cardContainer addSubview:_titleLabel];
 
   _authorLabel = [[UILabel alloc] init];
-  _authorLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+  _authorLabel.font = [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightRegular];
+  _authorLabel.adjustsFontForContentSizeCategory = YES;
+  _authorLabel.numberOfLines = 0;
   _authorLabel.textColor = [UIColor secondaryLabelColor];
-  _authorLabel.textAlignment = NSTextAlignmentRight;
+  _authorLabel.textAlignment = NSTextAlignmentNatural;
   _authorLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [_cardContainer addSubview:_authorLabel];
 
@@ -88,9 +106,10 @@
   [_cardContainer addSubview:_statusIndicator];
 
   _chainPathLabel = [[UILabel alloc] init];
-  _chainPathLabel.font = [UIFont fontWithName:@"Menlo" size:11];
+  _chainPathLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleFootnote] scaledFontForFont:[UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular]];
   _chainPathLabel.textColor = [UIColor secondaryLabelColor];
   _chainPathLabel.numberOfLines = 0;
+  _chainPathLabel.adjustsFontForContentSizeCategory = YES;
   _chainPathLabel.lineBreakMode = NSLineBreakByCharWrapping;
   _chainPathLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [_cardContainer addSubview:_chainPathLabel];
@@ -119,7 +138,7 @@
   _valueSlider = [[UISlider alloc] init];
   _valueSlider.hidden = YES;
   _valueSlider.userInteractionEnabled = YES;
-  [_valueSlider.heightAnchor constraintEqualToConstant:30].active = YES;
+  [_valueSlider.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
   [_valueSlider addTarget:self
                    action:@selector(onSliderChanged:)
          forControlEvents:UIControlEventValueChanged];
@@ -156,7 +175,7 @@
   _metaInfoLabel = [[UILabel alloc] init];
   _metaInfoLabel.font =
       [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
-  _metaInfoLabel.textColor = [UIColor tertiaryLabelColor];
+  _metaInfoLabel.textColor = [UIColor secondaryLabelColor];
   _metaInfoLabel.textAlignment = NSTextAlignmentCenter;
   [_centerStackView addArrangedSubview:_metaInfoLabel];
 
@@ -182,7 +201,7 @@
        forControlEvents:UIControlEventTouchUpInside];
 
   _btnApply = [self createButton:TR(@"Btn_Apply")
-                           color:[UIColor systemBlueColor]
+                           color:[VMUIHelper accentColor]
                           filled:YES];
   [_btnApply addTarget:self
                 action:@selector(onApplyTap)
@@ -192,7 +211,7 @@
   [btnStack addArrangedSubview:_btnToggle];
   [btnStack addArrangedSubview:_btnApply]; 
 
-  CGFloat p = 14.0;
+  CGFloat p = 16.0;
 
   [NSLayoutConstraint activateConstraints:@[
     [_cardContainer.topAnchor constraintEqualToAnchor:self.contentView.topAnchor
@@ -202,10 +221,10 @@
                        constant:-6],
     [_cardContainer.leadingAnchor
         constraintEqualToAnchor:self.contentView.leadingAnchor
-                       constant:12],
+                       constant:0],
     [_cardContainer.trailingAnchor
         constraintEqualToAnchor:self.contentView.trailingAnchor
-                       constant:-12],
+                       constant:0],
 
     [_titleLabel.topAnchor constraintEqualToAnchor:_cardContainer.topAnchor
                                           constant:p],
@@ -213,11 +232,11 @@
         constraintEqualToAnchor:_cardContainer.leadingAnchor
                        constant:p],
     [_titleLabel.trailingAnchor
-        constraintLessThanOrEqualToAnchor:_authorLabel.leadingAnchor
+        constraintLessThanOrEqualToAnchor:_statusIndicator.leadingAnchor
                                  constant:-8],
 
-    [_authorLabel.centerYAnchor
-        constraintEqualToAnchor:_titleLabel.centerYAnchor],
+    [_authorLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:4],
+    [_authorLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
     [_authorLabel.trailingAnchor
         constraintEqualToAnchor:_statusIndicator.leadingAnchor
                        constant:-8],
@@ -230,7 +249,7 @@
     [_statusIndicator.widthAnchor constraintEqualToConstant:8],
     [_statusIndicator.heightAnchor constraintEqualToConstant:8],
 
-    [_chainPathLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor
+    [_chainPathLabel.topAnchor constraintEqualToAnchor:_authorLabel.bottomAnchor
                                               constant:4],
     [_chainPathLabel.leadingAnchor
         constraintEqualToAnchor:_cardContainer.leadingAnchor
@@ -269,7 +288,7 @@
                        constant:-p],
     [btnStack.bottomAnchor constraintEqualToAnchor:_cardContainer.bottomAnchor
                                           constant:-p],
-    [btnStack.heightAnchor constraintEqualToConstant:38],
+    [btnStack.heightAnchor constraintGreaterThanOrEqualToConstant:44],
   ]];
 }
 
@@ -289,8 +308,14 @@
   _metaInfoLabel.text = [NSString stringWithFormat:@"%@ • %@", addr, typeStr];
 
   _valueDisplayLabel.text = val;
+  _valueDisplayLabel.numberOfLines = 0;
+  _metaInfoLabel.numberOfLines = 0;
+  _valueSlider.accessibilityLabel = _titleLabel.text;
+  _valueSwitch.accessibilityLabel = _titleLabel.text;
+  _valueSlider.accessibilityValue = val;
+  _valueSwitch.accessibilityValue = val;
 
-  BOOL isSlider = [chain.type isEqualToString:TR(@"Type_Slider")] ||
+  BOOL isSlider = [chain.type isEqualToString:@"slider"] ||
                   chain.uiMode == VMPointerUIModeSlider;
   BOOL isSwitch = chain.uiMode == VMPointerUIModeSwitch;
   
@@ -325,7 +350,7 @@
     _titleLabel.text = chain.note ?: TR(@"Lock_Default_Note_Ptr");
 
     _cardContainer.layer.borderWidth = 1.0;
-    _cardContainer.layer.borderColor = [UIColor systemGray4Color].CGColor;
+    self.cardBorderColor = UIColor.systemGray4Color;
   } else {
     
     _cardContainer.layer.borderWidth = 0;
@@ -339,18 +364,17 @@
   
   void (^updates)(void) = ^{
     if (isLocked) {
-      self.cardContainer.layer.borderColor = [UIColor systemRedColor].CGColor;
-      self.cardContainer.backgroundColor =
-          [[UIColor systemRedColor] colorWithAlphaComponent:0.05];
-      self.statusIndicator.backgroundColor = [UIColor systemRedColor];
-      self.valueDisplayLabel.textColor = [UIColor systemRedColor];
+      self.cardBorderColor = VMUIHelper.accentColor;
+      self.cardContainer.backgroundColor = [VMUIHelper cardColor];
+      self.statusIndicator.backgroundColor = [VMUIHelper accentColor];
+      self.valueDisplayLabel.textColor = [VMUIHelper accentColor];
 
       [self updateButton:self.btnToggle
                    title:TR(@"Btn_Unlock")
-                   color:[UIColor systemRedColor]
+                   color:[VMUIHelper accentColor]
                   filled:YES];
     } else {
-      self.cardContainer.layer.borderColor = [UIColor clearColor].CGColor;
+      self.cardBorderColor = self.currentChain.isImported ? UIColor.systemGray4Color : UIColor.clearColor;
       self.cardContainer.backgroundColor =
           [UIColor secondarySystemGroupedBackgroundColor];
       self.statusIndicator.backgroundColor = [UIColor systemGray4Color];
@@ -461,56 +485,19 @@
 
 #pragma mark - Helper UI Methods
 
-- (UIButton *)createButton:(NSString *)title
-                     color:(UIColor *)color
-                    filled:(BOOL)filled {
-  UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-  if (@available(iOS 15.0, *)) {
-    UIButtonConfiguration *conf =
-        filled ? [UIButtonConfiguration filledButtonConfiguration]
-               : [UIButtonConfiguration grayButtonConfiguration];
-    conf.baseBackgroundColor = filled ? color : [UIColor systemGray6Color];
-    conf.baseForegroundColor =
-        filled ? [UIColor whiteColor] : [UIColor labelColor];
-    conf.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-
-    NSDictionary *attrs = @{
-      NSFontAttributeName : [UIFont systemFontOfSize:13 weight:UIFontWeightBold]
-    };
-    conf.attributedTitle = [[NSAttributedString alloc] initWithString:title
-                                                           attributes:attrs];
-    btn.configuration = conf;
-  } else {
-    [btn setTitle:title forState:UIControlStateNormal];
-    btn.backgroundColor = filled ? color : [UIColor systemGray6Color];
-    btn.tintColor = filled ? [UIColor whiteColor] : [UIColor labelColor];
-    btn.layer.cornerRadius = 8;
-    btn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-  }
-  return btn;
+- (UIButton *)createButton:(NSString *)title color:(UIColor *)color filled:(BOOL)filled {
+  UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+  button.tintColor = filled ? [VMUIHelper accentColor] : [UIColor secondaryLabelColor];
+  [button setTitle:title forState:UIControlStateNormal];
+  [VMUIHelper styleButton:button primary:filled];
+  return button;
 }
 
-- (void)updateButton:(UIButton *)btn
-               title:(NSString *)title
-               color:(UIColor *)color
-              filled:(BOOL)filled {
-  if (@available(iOS 15.0, *)) {
-    UIButtonConfiguration *conf = btn.configuration;
-    conf.baseBackgroundColor = filled ? color : [UIColor systemGray6Color];
-    conf.baseForegroundColor =
-        filled ? [UIColor whiteColor] : [UIColor labelColor];
-
-    NSDictionary *attrs = @{
-      NSFontAttributeName : [UIFont systemFontOfSize:13 weight:UIFontWeightBold]
-    };
-    conf.attributedTitle = [[NSAttributedString alloc] initWithString:title
-                                                           attributes:attrs];
-    btn.configuration = conf;
-  } else {
-    [btn setTitle:title forState:UIControlStateNormal];
-    btn.backgroundColor = filled ? color : [UIColor systemGray6Color];
-    btn.tintColor = filled ? [UIColor whiteColor] : [UIColor labelColor];
-  }
+- (void)updateButton:(UIButton *)button title:(NSString *)title color:(UIColor *)color filled:(BOOL)filled {
+  button.tintColor = color;
+  [button setTitle:title forState:UIControlStateNormal];
+  button.accessibilityLabel = title;
+  [VMUIHelper styleButton:button primary:filled];
 }
 
 @end

@@ -61,7 +61,10 @@ VansonMod_FILES = \
 	src/utils/models/VMSignatureModel.mm \
 	src/utils/models/VMScriptModel.mm \
 	src/utils/helpers/VMLocalization.mm \
+	src/utils/helpers/VMLanguageRefresh.mm \
 	src/utils/helpers/VMUIHelper.mm \
+	src/ui/common/VMFormSheetViewController.mm \
+	src/utils/helpers/VMKeyboardAvoidance.mm \
 	src/utils/helpers/VMShareHelper.mm \
 	src/utils/helpers/VMIconHelper.mm \
 	src/utils/helpers/VMStoragePathHelper.mm \
@@ -92,6 +95,9 @@ VansonMod_FILES = \
 # 依赖框架
 VansonMod_FRAMEWORKS = UIKit CoreGraphics AVFoundation MobileCoreServices UniformTypeIdentifiers LinkPresentation JavaScriptCore
 VansonMod_CFLAGS = -fobjc-arc -I.
+ifeq ($(VM_LANGUAGE_TRACE),1)
+VansonMod_CFLAGS += -DVM_LANGUAGE_TRACE=1
+endif
 VansonMod_CCFLAGS = -fvisibility=hidden -fvisibility-inlines-hidden -std=c++17 -I.
 
 # 签名权限

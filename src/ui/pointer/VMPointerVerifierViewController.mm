@@ -1,6 +1,8 @@
 #import "../pointer/VMPointerVerifierViewController.h"
 #import "../../utils/helpers/VMShareHelper.h"
 #import "../../utils/helpers/VMUIHelper.h"
+#import "../../utils/helpers/VMKeyboardAvoidance.h"
+#import "../common/VMFormSheetViewController.h"
 #import "../main/VMAppSelectViewController.h"
 #import "../main/VMLockListViewController.h"
 #import "../memory/VMHexEditorViewController.h"
@@ -104,286 +106,143 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 #pragma mark - UI Layout (3分容器)
 - (void)setupUI {
-  self.tableView =
-      [[UITableView alloc] initWithFrame:CGRectZero
-                                   style:UITableViewStyleInsetGrouped];
+  self.view.tintColor = [VMUIHelper accentColor];
+  self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
+  self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   self.tableView.delegate = self;
   self.tableView.dataSource = self;
-  self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-  self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
-
-  if (@available(iOS 15.0, *)) {
-    self.tableView.sectionHeaderTopPadding = 0;
-  }
-
+  [VMUIHelper styleTableView:self.tableView];
   [self.view addSubview:self.tableView];
-
-  [NSLayoutConstraint activateConstraints:@[
-    [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-    [self.tableView.bottomAnchor
-        constraintEqualToAnchor:self.view.bottomAnchor],
-    [self.tableView.leadingAnchor
-        constraintEqualToAnchor:self.view.leadingAnchor],
-    [self.tableView.trailingAnchor
-        constraintEqualToAnchor:self.view.trailingAnchor]
-  ]];
-  UIView *headerWrapper = [[UIView alloc] init];
-  headerWrapper.backgroundColor = [UIColor clearColor];
-
-  self.headerContainer = [[UIView alloc] init];
-  self.headerContainer.backgroundColor =
-      [UIColor secondarySystemGroupedBackgroundColor];
-  self.headerContainer.layer.cornerRadius = 12;
-  self.headerContainer.translatesAutoresizingMaskIntoConstraints = NO;
-  [headerWrapper addSubview:self.headerContainer];
-
-  self.statusIcon = [[UIImageView alloc] init];
+  [VMKeyboardAvoidance installForScrollView:self.tableView];
+  UIView *wrapper = [UIView new];
+  UIStackView *layout = [UIStackView new];
+  layout.axis = UILayoutConstraintAxisVertical;
+  layout.spacing = 16;
+  layout.translatesAutoresizingMaskIntoConstraints = NO;
+  [wrapper addSubview:layout];
+  self.headerContainer = [UIView new];
+  [VMUIHelper styleCard:self.headerContainer];
+  UIStackView *form = [UIStackView new];
+  form.axis = UILayoutConstraintAxisVertical;
+  form.spacing = 14;
+  form.translatesAutoresizingMaskIntoConstraints = NO;
+  [self.headerContainer addSubview:form];
+  UIStackView *status = [UIStackView new];
+  status.axis = UILayoutConstraintAxisHorizontal;
+  status.alignment = UIStackViewAlignmentTop;
+  status.spacing = 12;
+  self.statusIcon = [UIImageView new];
   self.statusIcon.contentMode = UIViewContentModeScaleAspectFit;
-  self.statusIcon.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerContainer addSubview:self.statusIcon];
-
-  self.appNameLabel = [[UILabel alloc] init];
-  self.appNameLabel.font = [UIFont boldSystemFontOfSize:16];
-  self.appNameLabel.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerContainer addSubview:self.appNameLabel];
-
-  self.bundleIdLabel = [[UILabel alloc] init];
-  self.bundleIdLabel.font = [UIFont systemFontOfSize:12];
-  self.bundleIdLabel.textColor = [UIColor systemGrayColor];
-  self.bundleIdLabel.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerContainer addSubview:self.bundleIdLabel];
-
-  self.inputField = [[UITextField alloc] init];
-  self.inputField.borderStyle = UITextBorderStyleRoundedRect;
+  [self.statusIcon.widthAnchor constraintEqualToConstant:28].active = YES;
+  [self.statusIcon.heightAnchor constraintEqualToConstant:28].active = YES;
+  [status addArrangedSubview:self.statusIcon];
+  UIStackView *identity = [UIStackView new];
+  identity.axis = UILayoutConstraintAxisVertical;
+  identity.spacing = 4;
+  self.appNameLabel = [UILabel new];
+  self.appNameLabel.font = [VMUIHelper scaledFontOfSize:17 weight:UIFontWeightSemibold];
+  self.appNameLabel.adjustsFontForContentSizeCategory = YES;
+  self.appNameLabel.numberOfLines = 0;
+  self.bundleIdLabel = [UILabel new];
+  self.bundleIdLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1] scaledFontForFont:[UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular]];
+  self.bundleIdLabel.adjustsFontForContentSizeCategory = YES;
+  self.bundleIdLabel.textColor = [UIColor secondaryLabelColor];
+  self.bundleIdLabel.numberOfLines = 0;
+  self.bundleIdLabel.lineBreakMode = NSLineBreakByCharWrapping;
+  [self.bundleIdLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+  [identity addArrangedSubview:self.appNameLabel];
+  [identity addArrangedSubview:self.bundleIdLabel];
+  [status addArrangedSubview:identity];
+  [form addArrangedSubview:status];
+  self.inputField = [UITextField new];
   self.inputField.placeholder = TR(@"Ptr_Saved_Placeholder");
+  self.inputField.accessibilityLabel = TR(@"Ptr_Saved_Placeholder");
   self.inputField.keyboardType = UIKeyboardTypeASCIICapable;
   self.inputField.delegate = self;
   self.inputField.returnKeyType = UIReturnKeyDone;
-  self.inputField.translatesAutoresizingMaskIntoConstraints = NO;
+  [VMUIHelper styleTextField:self.inputField];
+  [self.inputField.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
   [self addDoneButtonTo:self.inputField];
-  [self.headerContainer addSubview:self.inputField];
-
-  NSArray *types = @[
-    TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"),
-    TR(@"Type_F32"), TR(@"Type_F64")
-  ];
-  self.typeSegment = [[UISegmentedControl alloc] initWithItems:types];
-  self.typeSegment.selectedSegmentIndex = 2; 
-  self.typeSegment.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerContainer addSubview:self.typeSegment];
-
-  UILabel *hintLabel = [[UILabel alloc] init];
-  hintLabel.text = TR(@"Verifier_Auto_Reconnect_Hint");
-  hintLabel.font = [UIFont systemFontOfSize:10];
-  hintLabel.textColor = [UIColor systemGrayColor];
-  hintLabel.textAlignment = NSTextAlignmentCenter;
-  hintLabel.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerContainer addSubview:hintLabel];
-
-  UIStackView *buttonStack = [[UIStackView alloc] init];
-  buttonStack.axis = UILayoutConstraintAxisHorizontal;
-  buttonStack.distribution = UIStackViewDistributionFillEqually;
-  buttonStack.spacing = 8;
-  buttonStack.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerContainer addSubview:buttonStack];
-
-  self.verifyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-  self.verifyButton.backgroundColor = [UIColor systemBlueColor];
-  self.verifyButton.layer.cornerRadius = 8;
-  [self.verifyButton setTitleColor:[UIColor whiteColor]
-                          forState:UIControlStateNormal];
-  [self.verifyButton setTitle:TR(@"Verifier_Btn_Verify")
-                     forState:UIControlStateNormal];
-  [self.verifyButton addTarget:self
-                        action:@selector(runVerification)
-              forControlEvents:UIControlEventTouchUpInside];
-
-  UIButton *saveButton = [UIButton buttonWithType:UIButtonTypeSystem];
-  saveButton.backgroundColor = [UIColor systemGreenColor];
-  saveButton.layer.cornerRadius = 8;
-  [saveButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-  [saveButton setTitle:TR(@"Verifier_Btn_Save") forState:UIControlStateNormal];
-  [saveButton addTarget:self
-                 action:@selector(manualSaveAction)
-       forControlEvents:UIControlEventTouchUpInside];
-
-  [buttonStack addArrangedSubview:self.verifyButton];
-  [buttonStack addArrangedSubview:saveButton];
-
-  self.filterSwitch = [[UISwitch alloc] init];
-  self.filterSwitch.transform = CGAffineTransformMakeScale(0.8, 0.8);
-  self.filterSwitch.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.filterSwitch addTarget:self
-                        action:@selector(toggleFilter)
-              forControlEvents:UIControlEventValueChanged];
-  [self.headerContainer addSubview:self.filterSwitch];
-
-  self.filterLabel = [[UILabel alloc] init];
+  [form addArrangedSubview:self.inputField];
+  self.typeSegment = [[UISegmentedControl alloc] initWithItems:@[TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"), TR(@"Type_F32"), TR(@"Type_F64")]];
+  self.typeSegment.selectedSegmentIndex = 2;
+  self.typeSegment.accessibilityLabel = TR(@"Value_Type");
+  [self.typeSegment.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [form addArrangedSubview:self.typeSegment];
+  UILabel *hint = [UILabel new];
+  hint.text = TR(@"Verifier_Auto_Reconnect_Hint");
+  hint.font = [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightRegular];
+  hint.adjustsFontForContentSizeCategory = YES;
+  hint.numberOfLines = 0;
+  hint.textColor = [UIColor secondaryLabelColor];
+  [form addArrangedSubview:hint];
+  self.verifyButton = [VMUIHelper createButtonWithTitle:TR(@"Verifier_Btn_Verify") color:[VMUIHelper accentColor] target:self action:@selector(runVerification)];
+  [VMUIHelper styleButton:self.verifyButton primary:YES];
+  [self.verifyButton.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  UIButton *save = [VMUIHelper createButtonWithTitle:TR(@"Verifier_Btn_Save") color:[VMUIHelper accentColor] target:self action:@selector(manualSaveAction)];
+  [VMUIHelper styleButton:save primary:NO];
+  [save.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [form addArrangedSubview:self.verifyButton];
+  [form addArrangedSubview:save];
+  [layout addArrangedSubview:self.headerContainer];
+  self.statsContainer = [UIView new];
+  [VMUIHelper styleCard:self.statsContainer];
+  UIStackView *summary = [UIStackView new];
+  summary.axis = UILayoutConstraintAxisVertical;
+  summary.spacing = 12;
+  summary.translatesAutoresizingMaskIntoConstraints = NO;
+  [self.statsContainer addSubview:summary];
+  self.statsLabel = [UILabel new];
+  self.statsLabel.font = [VMUIHelper scaledFontOfSize:14 weight:UIFontWeightSemibold];
+  self.statsLabel.adjustsFontForContentSizeCategory = YES;
+  self.statsLabel.numberOfLines = 0;
+  self.statsLabel.textColor = [VMUIHelper accentColor];
+  [summary addArrangedSubview:self.statsLabel];
+  UIStackView *filter = [UIStackView new];
+  filter.axis = UILayoutConstraintAxisHorizontal;
+  filter.alignment = UIStackViewAlignmentCenter;
+  filter.spacing = 12;
+  self.filterLabel = [UILabel new];
   self.filterLabel.text = TR(@"Verifier_Filter_Valid");
-  self.filterLabel.font = [UIFont systemFontOfSize:10];
-  self.filterLabel.textColor = [UIColor systemGrayColor];
-  self.filterLabel.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerContainer addSubview:self.filterLabel];
-
-  CGFloat p = 12.0;
+  self.filterLabel.font = [VMUIHelper scaledFontOfSize:14 weight:UIFontWeightRegular];
+  self.filterLabel.adjustsFontForContentSizeCategory = YES;
+  self.filterLabel.numberOfLines = 0;
+  self.filterSwitch = [UISwitch new];
+  self.filterSwitch.onTintColor = [VMUIHelper accentColor];
+  self.filterSwitch.accessibilityLabel = self.filterLabel.text;
+  [self.filterSwitch addTarget:self action:@selector(toggleFilter) forControlEvents:UIControlEventValueChanged];
+  [filter addArrangedSubview:self.filterLabel];
+  [filter addArrangedSubview:self.filterSwitch];
+  [filter.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [summary addArrangedSubview:filter];
+  [layout addArrangedSubview:self.statsContainer];
   [NSLayoutConstraint activateConstraints:@[
-    [self.statusIcon.leadingAnchor
-        constraintEqualToAnchor:self.headerContainer.leadingAnchor
-                       constant:p],
-    [self.statusIcon.topAnchor
-        constraintEqualToAnchor:self.headerContainer.topAnchor
-                       constant:p],
-    [self.statusIcon.widthAnchor constraintEqualToConstant:24],
-    [self.statusIcon.heightAnchor constraintEqualToConstant:24],
-
-    [self.appNameLabel.leadingAnchor
-        constraintEqualToAnchor:self.statusIcon.trailingAnchor
-                       constant:8],
-    [self.appNameLabel.centerYAnchor
-        constraintEqualToAnchor:self.statusIcon.centerYAnchor],
-    [self.bundleIdLabel.leadingAnchor
-        constraintEqualToAnchor:self.appNameLabel.leadingAnchor],
-    [self.bundleIdLabel.topAnchor
-        constraintEqualToAnchor:self.appNameLabel.bottomAnchor
-                       constant:2],
-
-    [self.filterSwitch.trailingAnchor
-        constraintEqualToAnchor:self.headerContainer.trailingAnchor
-                       constant:-p],
-    [self.filterSwitch.topAnchor
-        constraintEqualToAnchor:self.headerContainer.topAnchor
-                       constant:p],
-    [self.filterLabel.centerXAnchor
-        constraintEqualToAnchor:self.filterSwitch.centerXAnchor],
-    [self.filterLabel.topAnchor
-        constraintEqualToAnchor:self.filterSwitch.bottomAnchor
-                       constant:2],
-
-    [self.inputField.topAnchor
-        constraintEqualToAnchor:self.bundleIdLabel.bottomAnchor
-                       constant:15],
-    [self.inputField.leadingAnchor
-        constraintEqualToAnchor:self.headerContainer.leadingAnchor
-                       constant:p],
-    [self.inputField.trailingAnchor
-        constraintEqualToAnchor:self.headerContainer.trailingAnchor
-                       constant:-p],
-    [self.inputField.heightAnchor constraintEqualToConstant:34],
-
-    [self.typeSegment.topAnchor
-        constraintEqualToAnchor:self.inputField.bottomAnchor
-                       constant:10],
-    [self.typeSegment.leadingAnchor
-        constraintEqualToAnchor:self.headerContainer.leadingAnchor
-                       constant:p],
-    [self.typeSegment.trailingAnchor
-        constraintEqualToAnchor:self.headerContainer.trailingAnchor
-                       constant:-p],
-    [self.typeSegment.heightAnchor constraintEqualToConstant:32],
-
-    [hintLabel.topAnchor constraintEqualToAnchor:self.typeSegment.bottomAnchor
-                                        constant:8],
-    [hintLabel.leadingAnchor
-        constraintEqualToAnchor:self.headerContainer.leadingAnchor
-                       constant:p],
-    [hintLabel.trailingAnchor
-        constraintEqualToAnchor:self.headerContainer.trailingAnchor
-                       constant:-p],
-
-    [buttonStack.topAnchor constraintEqualToAnchor:hintLabel.bottomAnchor
-                                          constant:12],
-    [buttonStack.leadingAnchor
-        constraintEqualToAnchor:self.headerContainer.leadingAnchor
-                       constant:p],
-    [buttonStack.trailingAnchor
-        constraintEqualToAnchor:self.headerContainer.trailingAnchor
-                       constant:-p],
-    [buttonStack.heightAnchor constraintEqualToConstant:38],
-    [self.verifyButton.heightAnchor constraintEqualToConstant:36],
-
-    [self.verifyButton.bottomAnchor
-        constraintEqualToAnchor:self.headerContainer.bottomAnchor
-                       constant:-p]
+    [layout.topAnchor constraintEqualToAnchor:wrapper.topAnchor constant:16],
+    [layout.bottomAnchor constraintEqualToAnchor:wrapper.bottomAnchor constant:-16],
+    [layout.leadingAnchor constraintEqualToAnchor:wrapper.leadingAnchor constant:16],
+    [layout.trailingAnchor constraintEqualToAnchor:wrapper.trailingAnchor constant:-16],
+    [form.topAnchor constraintEqualToAnchor:self.headerContainer.topAnchor constant:16],
+    [form.bottomAnchor constraintEqualToAnchor:self.headerContainer.bottomAnchor constant:-16],
+    [form.leadingAnchor constraintEqualToAnchor:self.headerContainer.leadingAnchor constant:16],
+    [form.trailingAnchor constraintEqualToAnchor:self.headerContainer.trailingAnchor constant:-16],
+    [summary.topAnchor constraintEqualToAnchor:self.statsContainer.topAnchor constant:16],
+    [summary.bottomAnchor constraintEqualToAnchor:self.statsContainer.bottomAnchor constant:-16],
+    [summary.leadingAnchor constraintEqualToAnchor:self.statsContainer.leadingAnchor constant:16],
+    [summary.trailingAnchor constraintEqualToAnchor:self.statsContainer.trailingAnchor constant:-16]
   ]];
-
-  self.statsContainer = [[UIView alloc] init];
-  self.statsContainer.backgroundColor =
-      [UIColor tertiarySystemGroupedBackgroundColor];
-  self.statsContainer.layer.cornerRadius = 8;
-  self.statsContainer.clipsToBounds = YES;
-  self.statsContainer.translatesAutoresizingMaskIntoConstraints = NO;
-  [headerWrapper addSubview:self.statsContainer];
-
-  self.statsLabel = [[UILabel alloc] init];
-  self.statsLabel.textAlignment = NSTextAlignmentCenter;
-  self.statsLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
-  self.statsLabel.textColor = [UIColor secondaryLabelColor];
-  self.statsLabel.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.statsContainer addSubview:self.statsLabel];
-
-  [NSLayoutConstraint activateConstraints:@[
-    [self.statsLabel.centerXAnchor
-        constraintEqualToAnchor:self.statsContainer.centerXAnchor],
-    [self.statsLabel.centerYAnchor
-        constraintEqualToAnchor:self.statsContainer.centerYAnchor]
-  ]];
-
-  [NSLayoutConstraint activateConstraints:@[
-    [self.headerContainer.topAnchor
-        constraintEqualToAnchor:headerWrapper.topAnchor
-                       constant:10],
-    [self.headerContainer.leadingAnchor
-        constraintEqualToAnchor:headerWrapper.leadingAnchor
-                       constant:12],
-    [self.headerContainer.trailingAnchor
-        constraintEqualToAnchor:headerWrapper.trailingAnchor
-                       constant:-12],
-
-    [self.statsContainer.topAnchor
-        constraintEqualToAnchor:self.headerContainer.bottomAnchor
-                       constant:12],
-    [self.statsContainer.leadingAnchor
-        constraintEqualToAnchor:headerWrapper.leadingAnchor
-                       constant:12],
-    [self.statsContainer.trailingAnchor
-        constraintEqualToAnchor:headerWrapper.trailingAnchor
-                       constant:-12],
-    [self.statsContainer.heightAnchor constraintEqualToConstant:30],
-
-    [self.statsContainer.bottomAnchor
-        constraintEqualToAnchor:headerWrapper.bottomAnchor
-                       constant:-10]
-  ]];
-
+  self.tableView.tableHeaderView = wrapper;
   [self updateStatusUI];
-  [self updateTableHeaderHeight:headerWrapper];
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
 }
 
 - (void)updateTableHeaderHeight:(UIView *)header {
-  if (!header)
-    return;
-
-  CGFloat width = self.tableView.bounds.size.width;
-  if (width <= 0)
-    width = [UIScreen mainScreen].bounds.size.width;
-
-  header.bounds = CGRectMake(0, 0, width, header.bounds.size.height);
-  [header setNeedsLayout];
-  [header layoutIfNeeded];
-
-  CGSize size =
-      [header systemLayoutSizeFittingSize:UILayoutFittingCompressedSize];
-
-  CGRect frame = header.frame;
-  frame.size.height = size.height;
-  header.frame = frame;
-
-  self.tableView.tableHeaderView = header;
+  if (self.tableView.tableHeaderView != header) self.tableView.tableHeaderView = header;
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
 }
 
 - (void)viewDidLayoutSubviews {
   [super viewDidLayoutSubviews];
-  [self updateTableHeaderHeight:self.tableView.tableHeaderView];
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
 }
 
 #pragma mark - Logic: 状态监测
@@ -407,7 +266,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
   NSString *appName = eng.currentProcessName ?: @"Unknown";
   
-  NSString *bundleID = eng.currentBundleID ?: (self.fileBundleID ?: @"--");
+  NSString *bundleID = connected ? eng.currentBundleID : (self.fileBundleID.length ? self.fileBundleID : eng.currentBundleID);
 
   if (connected) {
     self.appNameLabel.text = [NSString
@@ -425,7 +284,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     self.statusIcon.image = [UIImage systemImageNamed:@"xmark.circle.fill"];
     self.statusIcon.tintColor = [UIColor systemRedColor];
   }
-  self.bundleIdLabel.text = bundleID;
+  self.bundleIdLabel.text = bundleID.length ? bundleID : @"Bundle ID: —";
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
 }
 
 - (void)openAppSelector {
@@ -434,7 +294,13 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                     object:nil];
 
   if (self.tabBarController) {
-    self.tabBarController.selectedIndex = 0;
+    for (UIViewController *controller in self.tabBarController.viewControllers) {
+      if ([controller isKindOfClass:UINavigationController.class] &&
+          [((UINavigationController *)controller).viewControllers.firstObject isKindOfClass:VMAppSelectViewController.class]) {
+        self.tabBarController.selectedViewController = controller;
+        break;
+      }
+    }
   }
 }
 
@@ -842,224 +708,93 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (void)showAddToLockAlert:(VMPointerChain *)chain {
-  UIAlertController *alert =
-      [UIAlertController alertControllerWithTitle:TR(@"Lock_Add_Ptr_Title")
-                                          message:nil
-                                   preferredStyle:UIAlertControllerStyleAlert];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    
-    NSMutableString *chainStr = [NSMutableString string];
-    if (chain.moduleName) {
-      [chainStr appendFormat:@"%@+0x%llX", chain.moduleName, chain.baseOffset];
-    }
-    for (NSNumber *off in chain.offsets) {
-      [chainStr appendFormat:@" → %+lld", [off longLongValue]];
-    }
-    tf.text = chainStr;
-    tf.enabled = NO; 
-    tf.textColor = [UIColor systemGrayColor];
-    tf.font = [UIFont fontWithName:@"Menlo" size:11];
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 45, 30)];
-    l.text = TR(@"Lab_Chain_Colon");
-    l.font = [UIFont systemFontOfSize:12];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    NSString *defName =
-        [NSString stringWithFormat:TR(@"Ptr_Lock_Def_Note_Fmt"),
-                                   [[VMMemoryEngine shared] currentProcessName]
-                                       ?: @"Game",
-                                   (unsigned long)chain.offsets.count +
-                                       (chain.moduleName ? 1 : 0)];
-    tf.placeholder = defName;
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 45, 30)];
-    l.text = TR(@"Lab_Note_Colon");
-    l.font = [UIFont systemFontOfSize:12];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = chain.runtimeValue ?: @"0";
-    tf.keyboardType = UIKeyboardTypeNumberPad;
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 45, 30)];
-    l.text = TR(@"Lab_Value_Colon");
-    l.font = [UIFont systemFontOfSize:12];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = TR(@"Placeholder_Author_Default");
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 45, 30)];
-    l.text = TR(@"Lab_Auth_Colon");
-    l.font = [UIFont systemFontOfSize:12];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-
-  }];
-
-  UIViewController *contentVC = [[UIViewController alloc] init];
-  contentVC.preferredContentSize = CGSizeMake(270, 40); 
-  
-  UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[
-    TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"),
-    TR(@"Type_F32"), TR(@"Type_F64")
+  NSString *defaultNote = [NSString stringWithFormat:TR(@"Ptr_Lock_Def_Note_Fmt"),
+      [VMMemoryEngine shared].currentProcessName ?: @"Game",
+      (unsigned long)(chain.offsets.count + (chain.moduleName ? 1 : 0))];
+  NSString *bundleID = self.fileBundleID.length ? self.fileBundleID : [VMMemoryEngine shared].currentBundleID;
+  VMFormSheetViewController *form = [[VMFormSheetViewController alloc] initWithTitle:TR(@"Lock_Add_Ptr_Title") submitTitle:TR(@"Btn_Save")];
+  form.message = [chain displayString];
+  UITextField *noteField = [form addTextFieldWithLabel:TR(@"Lab_Note_Colon") value:defaultNote placeholder:TR(@"Placeholder_Note") keyboardType:UIKeyboardTypeDefault];
+  UITextField *valueField = [form addTextFieldWithLabel:TR(@"Lab_Value_Colon") value:chain.runtimeValue ?: @"0" placeholder:TR(@"Mod_Input_Value_Placeholder") keyboardType:UIKeyboardTypeNumbersAndPunctuation];
+  [form addSectionWithTitle:TR(@"Value_Type")];
+  UISegmentedControl *types = [[UISegmentedControl alloc] initWithItems:@[TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"), @"U8", @"U16", @"U32", @"U64", TR(@"Type_F32"), TR(@"Type_F64"), @"Str"]];
+  static const VMDataType verificationTypes[] = {VMDataTypeInt8, VMDataTypeInt16, VMDataTypeInt32, VMDataTypeInt64, VMDataTypeFloat, VMDataTypeDouble};
+  NSInteger selection = self.typeSegment.selectedSegmentIndex;
+  types.selectedSegmentIndex = selection >= 0 && selection < 6 ? verificationTypes[selection] : VMDataTypeInt32;
+  types.accessibilityLabel = TR(@"Value_Type");
+  types.translatesAutoresizingMaskIntoConstraints = NO;
+  UIScrollView *typeScroll = [UIScrollView new];
+  typeScroll.showsHorizontalScrollIndicator = NO;
+  [typeScroll addSubview:types];
+  [NSLayoutConstraint activateConstraints:@[
+    [typeScroll.heightAnchor constraintEqualToConstant:44],
+    [types.leadingAnchor constraintEqualToAnchor:typeScroll.contentLayoutGuide.leadingAnchor],
+    [types.trailingAnchor constraintEqualToAnchor:typeScroll.contentLayoutGuide.trailingAnchor],
+    [types.topAnchor constraintEqualToAnchor:typeScroll.contentLayoutGuide.topAnchor],
+    [types.bottomAnchor constraintEqualToAnchor:typeScroll.contentLayoutGuide.bottomAnchor],
+    [types.heightAnchor constraintEqualToAnchor:typeScroll.frameLayoutGuide.heightAnchor],
+    [types.widthAnchor constraintGreaterThanOrEqualToConstant:572],
+    [types.widthAnchor constraintGreaterThanOrEqualToAnchor:typeScroll.frameLayoutGuide.widthAnchor]
   ]];
-  seg.frame = CGRectMake(0, 5, 270, 30);
-  if (self.typeSegment) {
-    seg.selectedSegmentIndex = self.typeSegment.selectedSegmentIndex;
-  } else {
-    seg.selectedSegmentIndex = 2;
-  }
-  [contentVC.view addSubview:seg];
-  
-  [alert setValue:contentVC forKey:@"contentViewController"];
-
-  [alert
-      addAction:
-          [UIAlertAction
-              actionWithTitle:TR(@"Btn_Confirm")
-                        style:UIAlertActionStyleDefault
-                      handler:^(UIAlertAction *a) {
-                        
-                        UITextField *tfNote = alert.textFields[1];
-                        UITextField *tfValue = alert.textFields[2];
-                        UITextField *tfAuth = alert.textFields[3];
-
-                        NSString *noteText = tfNote.text;
-                        NSString *authText = tfAuth.text;
-                        NSString *valueText = tfValue.text;
-
-                        NSString *defName = [NSString
-                            stringWithFormat:TR(@"Ptr_Lock_Def_Note_Fmt"),
-                                             [[VMMemoryEngine shared]
-                                                 currentProcessName]
-                                                 ?: @"Game",
-                                             (unsigned long)
-                                                     chain.offsets.count +
-                                                 (chain.moduleName ? 1 : 0)];
-                        chain.note = (noteText.length > 0) ? noteText : defName;
-
-                        chain.author =
-                            (authText.length > 0) ? authText : @"VansonMod";
-
-                        chain.isImported = NO;
-
-                        static const VMDataType typeMap[] = {
-                            VMDataTypeInt8,  VMDataTypeInt16, VMDataTypeInt32,
-                            VMDataTypeInt64, VMDataTypeFloat, VMDataTypeDouble};
-                        NSInteger idx = seg.selectedSegmentIndex;
-                        chain.lockType = (idx >= 0 && idx < 6)
-                                             ? typeMap[idx]
-                                             : VMDataTypeInt32;
-
-                        chain.lockEnabled = NO;
-                        chain.lockValue = (valueText.length > 0)
-                                              ? valueText
-                                              : (chain.runtimeValue ?: @"0");
-
-                        NSString *bid = self.fileBundleID;
-                        if (!bid || bid.length == 0) {
-                          bid = [[VMMemoryEngine shared] currentBundleID];
-                        }
-                        chain.bundleID = bid;
-
-                        if (bid && bid.length > 0) {
+  [types addAction:[UIAction actionWithHandler:^(__kindof UIAction *action) {
+    UISegmentedControl *control = action.sender;
+    valueField.keyboardType = control.selectedSegmentIndex == VMDataTypeString ? UIKeyboardTypeDefault : UIKeyboardTypeNumbersAndPunctuation;
+    if (valueField.isFirstResponder) [valueField reloadInputViews];
+  }] forControlEvents:UIControlEventValueChanged];
+  [form addView:typeScroll];
+  UITextField *authorField = [form addTextFieldWithLabel:TR(@"Label_Author") value:TR(@"Placeholder_Author_Default") placeholder:TR(@"Placeholder_Author") keyboardType:UIKeyboardTypeDefault];
+  __weak VMPointerVerifierViewController *weakSelf = self;
+  form.submitHandler = ^NSString *(VMFormSheetViewController *sheet) {
+    if (!bundleID.length) return TR(@"Err_Not_Connected_Msg");
+    VMPointerChain *saved = [VMPointerChain fromDictionary:[chain toDictionary]];
+    saved.note = noteField.text.length ? noteField.text : defaultNote;
+    saved.author = authorField.text.length ? authorField.text : @"VansonMod";
+    saved.isImported = NO;
+    saved.lockEnabled = NO;
+    saved.lockType = types.selectedSegmentIndex;
+    saved.lockValue = valueField.text.length ? valueField.text : (chain.runtimeValue ?: @"0");
+    saved.bundleID = bundleID;
+    saved.runtimeValue = chain.runtimeValue;
+    saved.cachedRuntimeAddress = chain.cachedRuntimeAddress;
+    saved.isRuntimeValid = chain.isRuntimeValid;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                          id proxy = [NSClassFromString(@"LSApplicationProxy")
-                              performSelector:
-                                  NSSelectorFromString(
-                                      @"applicationProxyForIdentifier:")
-                                   withObject:bid];
-                          if (proxy) {
-                            chain.appName =
-                                [proxy performSelector:NSSelectorFromString(
-                                                           @"localizedName")];
-                            NSString *ver = [proxy
-                                performSelector:NSSelectorFromString(
-                                                    @"shortVersionString")];
-                            if (!ver)
-                              ver =
-                                  [proxy performSelector:NSSelectorFromString(
-                                                             @"bundleVersion")];
-                            chain.appVersion = ver;
-                          }
+    id proxy = [NSClassFromString(@"LSApplicationProxy") performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:bundleID];
+    if (proxy) {
+      saved.appName = [proxy performSelector:NSSelectorFromString(@"localizedName")];
+      saved.appVersion = [proxy performSelector:NSSelectorFromString(@"shortVersionString")];
+    }
 #pragma clang diagnostic pop
-                        }
-                        [[VMLockManager shared] addPointerToLock:chain];
-                        UIAlertController *shareAlert = [UIAlertController
-                            alertControllerWithTitle:TR(@"Share_Title")
-                                             message:TR(@"Share_Msg")
-                                      preferredStyle:
-                                          UIAlertControllerStyleAlert];
-                        [shareAlert
-                            addAction:
-                                [UIAlertAction
-                                    actionWithTitle:TR(@"Share_Go_Locks")
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction *action) {
-                                              UITabBarController *tabBar =
-                                                  self.tabBarController;
-                                              if (tabBar &&
-                                                  tabBar.viewControllers.count >
-                                                      3) {
-                                                
-                                                tabBar.selectedIndex = 3;
-
-                                                UINavigationController *nav =
-                                                    (UINavigationController
-                                                         *)tabBar
-                                                        .selectedViewController;
-                                                [nav
-                                                    popToRootViewControllerAnimated:
-                                                        NO];
-
-                                                if ([nav.topViewController
-                                                        isKindOfClass:
-                                                            NSClassFromString(
-                                                                @"VMLockListVie"
-                                                                @"wControlle"
-                                                                @"r")]) {
-                                                  
-                                                  id lockVC =
-                                                      nav.topViewController;
-                                                  
-                                                  [lockVC
-                                                      setValue:@(2)
-                                                        forKey:
-                                                            @"defaultTabIndex"];
-
-                                                  if ([lockVC
-                                                          respondsToSelector:
-                                                              @selector
-                                                          (tabChanged)]) {
-                                                    [lockVC performSelector:
-                                                                @selector
-                                                            (tabChanged)];
-                                                  }
-                                                }
-                                              }
-                                            }]];
-                        [shareAlert
-                            addAction:
-                                [UIAlertAction
-                                    actionWithTitle:TR(@"Btn_Cancel")
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
-                        [self presentViewController:shareAlert
-                                           animated:YES
-                                         completion:nil];
-                      }]];
-
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
-                                            style:UIAlertActionStyleCancel
-                                          handler:nil]];
-  [self presentViewController:alert animated:YES completion:nil];
+    [[VMLockManager shared] addPointerToLock:saved];
+    return nil;
+  };
+  form.didSubmit = ^{
+    VMPointerVerifierViewController *self = weakSelf;
+    if (!self) return;
+    UIAlertController *share = [UIAlertController alertControllerWithTitle:TR(@"Share_Title") message:TR(@"Share_Msg") preferredStyle:UIAlertControllerStyleAlert];
+    [share addAction:[UIAlertAction actionWithTitle:TR(@"Share_Go_Locks") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+      for (UIViewController *controller in self.tabBarController.viewControllers) {
+        if (controller.tabBarItem.tag != 3 || ![controller isKindOfClass:UINavigationController.class]) continue;
+        self.tabBarController.selectedViewController = controller;
+        UINavigationController *nav = (UINavigationController *)controller;
+        [nav popToRootViewControllerAnimated:NO];
+        if ([nav.topViewController isKindOfClass:VMLockListViewController.class]) {
+          id lockVC = nav.topViewController;
+          [lockVC setValue:@2 forKey:@"defaultTabIndex"];
+          if ([lockVC respondsToSelector:@selector(tabChanged)]) [lockVC performSelector:@selector(tabChanged)];
+        }
+        break;
+      }
+    }]];
+    [share addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:share animated:YES completion:nil];
+  };
+  [form presentFrom:self];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [typeScroll layoutIfNeeded];
+    CGFloat width = types.bounds.size.width / types.numberOfSegments;
+    [typeScroll scrollRectToVisible:CGRectMake(width * types.selectedSegmentIndex, 0, width, 44) animated:NO];
+  });
 }
 
 - (void)addDoneButtonTo:(UITextField *)textField {
@@ -1079,6 +814,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                        style:UIBarButtonItemStyleDone
                                       target:self
                                       action:@selector(dismissKeyboard)];
+  [VMUIHelper styleConfirmationItem:done];
 
   toolbar.items = @[ flex, done ];
   textField.inputAccessoryView = toolbar;

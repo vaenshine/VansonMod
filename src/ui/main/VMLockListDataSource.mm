@@ -1,4 +1,5 @@
 #import "VMLockListDataSource.h"
+#import "../../utils/helpers/VMUIHelper.h"
 #import "../patch/VMRVAManagerCell.h"
 #import "../pointer/VMPointerLockCell.h"
 #import "../pointer/VMSignatureLockCell.h"
@@ -60,7 +61,13 @@
     cell.detailTextLabel.text =
         [NSString stringWithFormat:@"%@ (%lu)", bid, (unsigned long)count];
     cell.imageView.image = [UIImage systemImageNamed:@"folder.fill"];
-    cell.imageView.tintColor = [UIColor systemBlueColor];
+    cell.imageView.tintColor = [VMUIHelper accentColor];
+    cell.textLabel.font = [VMUIHelper scaledFontOfSize:17 weight:UIFontWeightSemibold];
+    cell.textLabel.numberOfLines = 0;
+    cell.textLabel.adjustsFontForContentSizeCategory = YES;
+    cell.detailTextLabel.font = [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightRegular];
+    cell.detailTextLabel.numberOfLines = 0;
+    cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
     cell.selectionStyle = tableView.isEditing
                               ? UITableViewCellSelectionStyleDefault
                               : UITableViewCellSelectionStyleNone;
@@ -123,8 +130,7 @@
       uint64_t finalAddr = [self.dataProvider forceResolveChain:chain];
       if (finalAddr > 0) {
         addrStr = [NSString stringWithFormat:@"0x%llX", finalAddr];
-        VMDataType t = (chain.lockType == 0) ? VMDataTypeInt32
-                                             : (VMDataType)chain.lockType;
+        VMDataType t = (VMDataType)chain.lockType;
         valStr = [[VMMemoryEngine shared] readAddress:finalAddr type:t];
       } else {
         addrStr = TR(@"Text_Null");
@@ -133,7 +139,7 @@
       valStr = TR(@"Status_Disconnected");
     }
     VMDataType type =
-        (chain.lockType == 0) ? VMDataTypeInt32 : (VMDataType)chain.lockType;
+        (VMDataType)chain.lockType;
     NSString *typeStr = [self.dataProvider typeNameForType:type];
     [cell configureWithChain:chain address:addrStr val:valStr type:typeStr];
     cell.selectionStyle = tableView.isEditing

@@ -74,34 +74,34 @@ static inline NSString* VMGenerateScriptGuideHTML() {
      "    <meta charset=\"UTF-8\">"
      "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no\">"
      "    <style>"
-     "        :root {"
-     "            --primary: #0a84ff; --secondary: #5e5ce6; --success: #32d74b; --warning: #ff9f0a; --danger: #ff453a;"
-     "            --bg: #1c1c1e; --card: #2c2c2e; --text: #ffffff; --text-dim: #8e8e93; --code-bg: #121212;"
-     "        }"
+     "        :root { color-scheme: light; --primary: #5856d6; --secondary: #5856d6; --success: #197b30; --warning: #985a00; --danger: #c9342b; --bg: #f2f2f7; --card: #ffffff; --text: #1c1c1e; --text-dim: #636366; --code-bg: #ededf2; --border: #d1d1d6; --tag-bg: #e5e5ea; --tag-text: #48484a; --code-text: #1b7938; --button-bg: #5856d6; --copy-bg: #ebebf0; --scenario-bg: #f5f5fa; --table-divider: #e5e5ea; --inline-code-bg: #f2f2f7; --purple: #8944a3; }"
+     "        :root[data-theme=dark] { color-scheme: dark; --primary: #a5a2ff; --secondary: #a5a2ff; --success: #5bdd87; --warning: #ffbf69; --danger: #ff6961; --bg: #000000; --card: #1c1c1e; --text: #f5f5f7; --text-dim: #aeaeb2; --code-bg: #111114; --border: #3a3a3c; --tag-bg: #39393d; --tag-text: #dedee3; --code-text: #5bdd87; --button-bg: #514fd1; --copy-bg: #343438; --scenario-bg: #28282c; --table-divider: #38383c; --inline-code-bg: #101014; --purple: #dd9df2; }"
+     "        @media (prefers-color-scheme: dark) { :root:not([data-theme=light]) { color-scheme: dark; --primary: #a5a2ff; --secondary: #a5a2ff; --success: #5bdd87; --warning: #ffbf69; --danger: #ff6961; --bg: #000000; --card: #1c1c1e; --text: #f5f5f7; --text-dim: #aeaeb2; --code-bg: #111114; --border: #3a3a3c; --tag-bg: #39393d; --tag-text: #dedee3; --code-text: #5bdd87; --button-bg: #514fd1; --copy-bg: #343438; --scenario-bg: #28282c; --table-divider: #38383c; --inline-code-bg: #101014; --purple: #dd9df2; } }"
      "        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 16px; font-size: 14px; line-height: 1.5; }"
      "        .header-center { text-align: center; margin-bottom: 30px; }"
      "        .header-center h1 { font-size: 32px; font-weight: 900; color: var(--primary); margin-bottom: 5px; letter-spacing: -1px; }"
      "        .h5gg-support { border: 1px dashed var(--success); padding: 15px; border-radius: 10px; font-size: 13px; color: var(--success); margin-bottom: 25px; background: rgba(50, 215, 75, 0.05); }"
-     "        .section-title { font-size: 20px; font-weight: 700; margin: 28px 0 15px 0; color: var(--primary); border-bottom: 1px solid #3a3a3c; padding-bottom: 6px; }"
-     "        .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 20px; border: 1px solid #3a3a3c; position: relative; }"
+     "        .section-title { font-size: 20px; font-weight: 700; margin: 28px 0 15px 0; color: var(--primary); border-bottom: 1px solid var(--border); padding-bottom: 6px; }"
+     "        .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 20px; border: 1px solid var(--border); position: relative; }"
      "        .title-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }"
-     "        .tag { font-size: 10px; padding: 2px 8px; border-radius: 5px; background: #48484a; color: #d1d1d6; font-weight: bold; }"
+     "        .tag { font-size: 10px; padding: 2px 8px; border-radius: 5px; background: var(--tag-bg); color: var(--tag-text); font-weight: bold; }"
      "        .tag.blue { background: rgba(10, 132, 255, 0.2); color: var(--primary); }"
-     "        .tag.purple { background: rgba(175, 82, 222, 0.2); color: #af52de; }"
+     "        .tag.purple { background: rgba(175, 82, 222, 0.2); color: var(--purple); }"
      "        .tag.green { background: rgba(50, 215, 75, 0.2); color: var(--success); }"
      "        .tag.orange { background: rgba(255, 159, 10, 0.2); color: var(--warning); }"
      "        .title { font-weight: 600; font-size: 16px; }"
-     "        .code-box { background: var(--code-bg); border-radius: 8px; padding: 15px; font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px; color: #34c759; margin: 12px 0; overflow-x: auto; white-space: pre; border: 1px solid #1c1c1e; line-height: 1.6; }"
+     "        .code-box { background: var(--code-bg); border-radius: 8px; padding: 15px; font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px; color: var(--code-text); margin: 12px 0; overflow-x: auto; scrollbar-width: none; white-space: pre; border: 1px solid var(--border); line-height: 1.6; }"
+     "        .code-box::-webkit-scrollbar { display: none; }"
      "        .btn-group { display: flex; gap: 10px; margin-top: 12px; }"
      "        .btn { flex: 1; padding: 8px; border-radius: 8px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; transition: 0.2s; }"
-     "        .btn-copy { background: rgba(255,255,255,0.1); color: #fff; }"
-     "        .btn-insert { background: var(--primary); color: #fff; }"
+     "        .btn-copy { background: var(--copy-bg); color: var(--text); }"
+     "        .btn-insert { background: var(--button-bg); color: #fff; }"
      "        .btn:active { transform: scale(0.95); opacity: 0.8; }"
-     "        .scenario { font-size: 13px; color: var(--text-dim); padding: 10px; background: rgba(255,255,255,0.03); border-radius: 8px; border-left: 4px solid var(--primary); margin-top: 8px; }"
+     "        .scenario { font-size: 13px; color: var(--text-dim); padding: 10px; background: var(--scenario-bg); border-radius: 8px; border-left: 4px solid var(--primary); margin-top: 8px; }"
      "        .param-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }"
-     "        .param-table th { text-align: left; color: var(--text-dim); padding: 6px; border-bottom: 1px solid #3a3a3c; }"
-     "        .param-table td { padding: 6px; border-bottom: 1px solid #2c2c2e; color: #d1d1d6; }"
-     "        .param-table code { background: #1c1c1e; padding: 2px 6px; border-radius: 4px; color: #ff9f0a; }"
+     "        .param-table th { text-align: left; color: var(--text-dim); padding: 6px; border-bottom: 1px solid var(--border); }"
+     "        .param-table td { padding: 6px; border-bottom: 1px solid var(--table-divider); color: var(--text); }"
+     "        .param-table code { background: var(--inline-code-bg); padding: 2px 6px; border-radius: 4px; color: var(--warning); }"
      "    </style>"
      "</head>"
      "<body>"];
@@ -299,7 +299,7 @@ static inline NSString* VMGenerateScriptGuideHTML_Part2(NSMutableString *html, c
     [html appendFormat:@"<div class=\"btn-group\"><button class=\"btn btn-copy\" onclick=\"doCopy('code-pointer')\">%@</button><button class=\"btn btn-insert\" onclick=\"doInsert('code-pointer')\">%@</button></div>", S("btn_copy"), S("btn_insert")];
     [html appendString:@"</div>"];
     
-    [html appendFormat:@"<div class=\"section-title\">%@ <span style=\"font-size:12px;color:#ff9f0a;background:rgba(255,159,10,0.15);padding:2px 8px;border-radius:5px;font-weight:bold;\">%@</span></div>", S("section_13"), S("rva_jb_tag")];
+    [html appendFormat:@"<div class=\"section-title\">%@ <span style=\"font-size:12px;color:var(--warning);background:rgba(255,159,10,0.15);padding:2px 8px;border-radius:5px;font-weight:bold;\">%@</span></div>", S("section_13"), S("rva_jb_tag")];
     [html appendString:@"<div class=\"card\">"];
     [html appendFormat:@"<div class=\"title-row\"><span class=\"tag blue\">RVA</span><span class=\"title\">%@</span><span class=\"tag orange\">%@</span></div>", S("card_rva_title"), S("rva_jb_tag")];
     [html appendFormat:@"<div class=\"scenario\">%@%@</div>", S("rva_jb_warning"), S("desc_rva")];

@@ -52,7 +52,8 @@ kern_return_t mach_vm_protect(vm_map_t, mach_vm_address_t, mach_vm_size_t,
 #define FILE_BUFFER_SIZE (1024 * 1024)
 static const NSUInteger VM_VISIBLE_STRING_MAX_LEN = 256;
 
-static uint64_t VMParseAddressSetting(NSString *text, uint64_t fallback) {
+static uint64_t VMParseAddressSetting(id value, uint64_t fallback) {
+  NSString *text = [value isKindOfClass:NSString.class] || [value isKindOfClass:NSNumber.class] ? [value description] : nil;
   NSString *trimmed =
       [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
   if (trimmed.length == 0)
@@ -280,13 +281,13 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   self.searchRangeStart =
       VMParseAddressSetting([def objectForKey:@"startAddr"], 0x100000000ULL);
   self.searchRangeEnd =
-      VMParseAddressSetting([def objectForKey:@"endAddr"], 0x300000000ULL);
-  if (self.searchRangeEnd <= self.searchRangeStart) {
+      VMParseAddressSetting([def objectForKey:@"endAddr"], 0);
+  if (self.searchRangeEnd != 0 && self.searchRangeEnd <= self.searchRangeStart) {
     self.searchRangeStart = 0x100000000ULL;
-    self.searchRangeEnd = 0x300000000ULL;
+    self.searchRangeEnd = 0;
   }
   
-  NSString *grpStr = [def objectForKey:@"groupRange"];
+  NSString *grpStr = [[def objectForKey:@"groupRange"] description];
   if (grpStr && grpStr.length > 0) {
     if ([grpStr hasPrefix:@"0x"] || [grpStr hasPrefix:@"0X"]) {
       self.groupSearchRange = strtoull([grpStr UTF8String], NULL, 16);
@@ -297,14 +298,14 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     self.groupSearchRange = 0x100; 
   }
   
-  NSString *limitStr = [def objectForKey:@"resultLimit"];
+  NSString *limitStr = [[def objectForKey:@"resultLimit"] description];
   if (limitStr && limitStr.length > 0) {
     self.resultLimit = [limitStr integerValue];
   } else {
     self.resultLimit = 0;
   }
   
-  NSString *tolStr = [def objectForKey:@"floatTolerance"];
+  NSString *tolStr = [[def objectForKey:@"floatTolerance"] description];
   if (tolStr && tolStr.length > 0) {
     self.floatTolerance = [tolStr doubleValue];
   } else {
@@ -1361,8 +1362,8 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   if (!_core || !input)
     return;
 
-  if (items && items.count > 0) {
-    
+  if (items) {
+    if (items.count == 0) return;
     double dValue = [input doubleValue];
     long long iValue = [input longLongValue];
     NSMutableArray<NSDictionary *> *writes = [NSMutableArray array];

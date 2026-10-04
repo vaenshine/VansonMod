@@ -1,3 +1,4 @@
+#import "VMMemoryFeedback.h"
 #import "../memory/VMMemoryBrowserViewController.h"
 #import "include/VMMemoryEngine.h"
 #import "include/VMLocalization.h"
@@ -6,8 +7,9 @@
 #import "../memory/VMHexEditorViewController.h"
 #import "../memory/VMMemoryActionSheet.h"
 #import "../../utils/helpers/VMUIHelper.h"
+#include <errno.h>
 #define TR(key) ([[VMLocalization shared] localizedString:key])
-#define ROW_HEIGHT 44.0    
+#define ROW_HEIGHT 60.0
 #define PAGE_COUNT 100
 #define MAX_BUFFER_ROWS 1000
 #define PRELOAD_THRESHOLD 400
@@ -15,43 +17,36 @@
 #define NUMERIC_REFRESH_INTERVAL 0.5
 #define STRING_REFRESH_INTERVAL 1.0
 
-static BOOL VMInputLooksHex(NSString *input) {
-    NSCharacterSet *hexLetters = [NSCharacterSet characterSetWithCharactersInString:@"abcdefABCDEF"];
-    return [input rangeOfCharacterFromSet:hexLetters].location != NSNotFound;
+static BOOL VMParseBrowserInteger(NSString *input, BOOL signedOffset, uint64_t *magnitude, BOOL *negative) {
+    NSString *text = [(input ?: @"") stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    BOOL minus = [text hasPrefix:@"-"];
+    if ([text hasPrefix:@"+"] || minus) {
+        if (!signedOffset) return NO;
+        text = [text substringFromIndex:1];
+    }
+    if (text.length == 0) return NO;
+    int base = [text.lowercaseString hasPrefix:@"0x"] ||
+        [text rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"abcdefABCDEF"]].location != NSNotFound ? 16 : 10;
+    if ([text.lowercaseString hasPrefix:@"0x"]) text = [text substringFromIndex:2];
+    if (text.length == 0) return NO;
+    NSCharacterSet *digits = [NSCharacterSet characterSetWithCharactersInString:base == 16 ? @"0123456789abcdefABCDEF" : @"0123456789"];
+    if ([text rangeOfCharacterFromSet:digits.invertedSet].location != NSNotFound) return NO;
+    errno = 0;
+    char *end = NULL;
+    uint64_t value = strtoull(text.UTF8String, &end, base);
+    if (errno == ERANGE || !end || *end) return NO;
+    if (magnitude) *magnitude = value;
+    if (negative) *negative = minus;
+    return YES;
 }
 
-static uint64_t VMParseAddressInput(NSString *input) {
-    NSString *trimmed = [[(input ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] copy];
-    if (trimmed.length == 0) return 0;
-
-    if ([trimmed.lowercaseString hasPrefix:@"0x"]) {
-        return strtoull([trimmed UTF8String], NULL, 16);
-    }
-
-    int base = VMInputLooksHex(trimmed) ? 16 : 10;
-    return strtoull([trimmed UTF8String], NULL, base);
-}
-
-static int64_t VMParseSignedOffsetInput(NSString *input) {
-    NSString *trimmed = [[(input ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] copy];
-    if (trimmed.length == 0) return 0;
-
-    BOOL isNegative = [trimmed hasPrefix:@"-"];
-    BOOL hasSign = isNegative || [trimmed hasPrefix:@"+"];
-    NSString *body = hasSign ? [trimmed substringFromIndex:1] : trimmed;
-    body = [body stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (body.length == 0) return 0;
-
-    int base = 10;
-    if ([body.lowercaseString hasPrefix:@"0x"]) {
-        body = [body substringFromIndex:2];
-        base = 16;
-    } else if (VMInputLooksHex(body)) {
-        base = 16;
-    }
-
-    uint64_t magnitude = strtoull([body UTF8String], NULL, base);
-    return isNegative ? -(int64_t)magnitude : (int64_t)magnitude;
+static BOOL VMResolveBrowserOffset(NSString *input, uint64_t base, uint64_t *result) {
+    uint64_t magnitude = 0;
+    BOOL negative = NO;
+    if (!VMParseBrowserInteger(input, YES, &magnitude, &negative)) return NO;
+    if ((negative && magnitude > base) || (!negative && magnitude > UINT64_MAX - base)) return NO;
+    *result = negative ? base - magnitude : base + magnitude;
+    return YES;
 }
 
 static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targetAddress, BOOL emphasized) {
@@ -70,8 +65,8 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 
     UIColor *primaryColor = emphasized ? [UIColor labelColor] : [UIColor labelColor];
     UIColor *secondaryColor = emphasized ? [[UIColor secondaryLabelColor] colorWithAlphaComponent:0.95] : [UIColor secondaryLabelColor];
-    UIFont *primaryFont = [UIFont monospacedSystemFontOfSize:12 weight:emphasized ? UIFontWeightBold : UIFontWeightRegular];
-    UIFont *secondaryFont = [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
+    UIFont *primaryFont = [UIFont monospacedSystemFontOfSize:14 weight:emphasized ? UIFontWeightBold : UIFontWeightRegular];
+    UIFont *secondaryFont = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
     NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
     style.lineBreakMode = NSLineBreakByTruncatingMiddle;
     style.lineSpacing = 1.0;
@@ -91,12 +86,12 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 }
 @interface VMMemoryBrowserViewController () <UITableViewDelegate, UITableViewDataSource, UIGestureRecognizerDelegate>
 @property (nonatomic, strong) UITableView *tableView;
-@property (nonatomic, strong) NSMutableArray *dataList; 
-@property (nonatomic, assign) uint64_t minAddr; 
-@property (nonatomic, assign) uint64_t maxAddr; 
-@property (nonatomic, assign) int typeSize; 
+@property (nonatomic, strong) NSMutableArray *dataList;
+@property (nonatomic, assign) uint64_t minAddr;
+@property (nonatomic, assign) uint64_t maxAddr;
+@property (nonatomic, assign) int typeSize;
 @property (nonatomic, strong) UISegmentedControl *typeSegment;
-@property (nonatomic, assign) BOOL isLoading; 
+@property (nonatomic, assign) BOOL isLoading;
 @property (nonatomic, assign) uint64_t targetAddress;
 @property (nonatomic, assign) BOOL isInitialLoad;
 @property (nonatomic, assign) BOOL isStrMode;
@@ -106,22 +101,30 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 
 @property (nonatomic, strong) UIBarButtonItem *originalRightBarButton;
 @property (nonatomic, strong) NSTimer *refreshTimer;
+@property (nonatomic, strong) UILabel *baseAddressLabel;
+@property (nonatomic, assign) NSUInteger loadGeneration;
+@property (nonatomic, assign) pid_t browsingPid;
+@property (nonatomic, assign) mach_port_t browsingTask;
 @end
 @implementation VMMemoryBrowserViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [UIColor systemBackgroundColor];
+    self.view.backgroundColor = [VMUIHelper canvasColor];
+    self.title = TR(@"Mod_Menu_Value");
+    self.browsingPid = [VMMemoryEngine shared].targetPid;
+    self.browsingTask = [VMMemoryEngine shared].targetTask;
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(checkBrowsingTarget) name:@"VMProcessChangedNotification" object:nil];
     self.targetAddress = self.address;
     self.isInitialLoad = YES;
-    
+
     self.isMultiSelectMode = NO;
     self.selectedAddresses = [NSMutableSet set];
 
     NSArray *types = @[TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"), TR(@"Type_F32"), TR(@"Type_F64"), @"Str"];
     self.typeSegment = [[UISegmentedControl alloc] initWithItems:types];
-    [self.typeSegment setTitleTextAttributes:@{NSFontAttributeName: [UIFont systemFontOfSize:11]} forState:UIControlStateNormal];
-    
-    NSInteger segIdx = 2; 
+    [self.typeSegment setTitleTextAttributes:@{NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+
+    NSInteger segIdx = 2;
     switch (self.type) {
       case VMDataTypeInt8: case VMDataTypeUInt8: segIdx = 0; break;
       case VMDataTypeInt16: case VMDataTypeUInt16: segIdx = 1; break;
@@ -134,16 +137,16 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     }
     self.typeSegment.selectedSegmentIndex = segIdx;
     [self.typeSegment addTarget:self action:@selector(typeChanged:) forControlEvents:UIControlEventValueChanged];
-    self.navigationItem.titleView = self.typeSegment;
+    self.typeSegment.accessibilityLabel = TR(@"Lock_Select_Type_Title");
 
     [self updateTypeSize];
 
-    self.minAddr = self.targetAddress - (PAGE_COUNT * self.typeSize);
-    self.maxAddr = self.targetAddress + (PAGE_COUNT * self.typeSize);
+    self.minAddr = self.targetAddress - MIN(self.targetAddress, (uint64_t)(PAGE_COUNT * self.typeSize));
+    self.maxAddr = self.targetAddress + MIN(UINT64_MAX - self.targetAddress, (uint64_t)(PAGE_COUNT * self.typeSize));
 
     self.dataList = [NSMutableArray array];
     self.strDataList = [NSMutableArray array];
-    
+
     if (self.isStrMode) {
         [self loadStrData];
     } else {
@@ -152,10 +155,10 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     [self setupUI];
 
     [VMUIHelper addFixedFooterTo:self forTableView:self.tableView];
-    
+
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self scrollToTargetAndHighlight];
-        
+
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             self.isInitialLoad = NO;
         });
@@ -164,7 +167,8 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    [self startAutoRefreshTimer];
+    [self checkBrowsingTarget];
+    if ([self browsingTargetIsValid]) [self startAutoRefreshTimer];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -173,47 +177,96 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 }
 
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self stopAutoRefreshTimer];
 }
 
+- (BOOL)browsingTargetIsValid {
+    return self.browsingTask != MACH_PORT_NULL && self.browsingPid == [VMMemoryEngine shared].targetPid && self.browsingTask == [VMMemoryEngine shared].targetTask;
+}
+
+- (void)checkBrowsingTarget {
+    if ([self browsingTargetIsValid]) return;
+    self.loadGeneration++;
+    self.isLoading = NO;
+    [self stopAutoRefreshTimer];
+    [self.dataList removeAllObjects];
+    [self.strDataList removeAllObjects];
+    self.typeSegment.superview.userInteractionEnabled = NO;
+    self.navigationItem.rightBarButtonItem.enabled = NO;
+    self.tableView.allowsSelection = NO;
+    self.tableView.backgroundView = [VMUIHelper emptyStateWithTitle:TR(@"Err_Not_Connected") message:TR(@"Str_Target_Changed") symbol:@"link.badge.plus"];
+    [self.tableView reloadData];
+}
+
 - (void)setupUI {
+    UIView *card = [UIView new];
+    [VMUIHelper styleCard:card];
+    card.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:card];
+    self.baseAddressLabel = [UILabel new];
+    self.baseAddressLabel.font = [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightSemibold];
+    self.baseAddressLabel.textColor = [VMUIHelper accentColor];
+    self.baseAddressLabel.numberOfLines = 1;
+    self.baseAddressLabel.adjustsFontSizeToFitWidth = YES;
+    self.baseAddressLabel.minimumScaleFactor = 0.85;
+    UIButton *jump = [UIButton buttonWithType:UIButtonTypeSystem];
+    [jump setTitle:TR(@"Btn_Jump") forState:UIControlStateNormal];
+    [VMUIHelper styleButton:jump primary:NO];
+    [jump addTarget:self action:@selector(promptJump) forControlEvents:UIControlEventTouchUpInside];
+    [jump.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+    UIStackView *addressRow = [[UIStackView alloc] initWithArrangedSubviews:@[self.baseAddressLabel, jump]];
+    addressRow.spacing = 12;
+    [jump setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[addressRow, self.typeSegment]];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 8;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [card addSubview:stack];
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
-    self.tableView.translatesAutoresizingMaskIntoConstraints = NO; 
+    self.tableView.showsHorizontalScrollIndicator = NO;
+    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     self.tableView.rowHeight = ROW_HEIGHT;
-    self.tableView.decelerationRate = self.isStrMode
-        ? UIScrollViewDecelerationRateFast
-        : UIScrollViewDecelerationRateNormal;
-    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone; 
-    
-    if (@available(iOS 15.0, *)) {
-        self.tableView.sectionHeaderTopPadding = 0;
-    }
-    
+    self.tableView.backgroundColor = [VMUIHelper canvasColor];
+    self.tableView.separatorInset = UIEdgeInsetsMake(0, 16, 0, 16);
+    self.tableView.tableFooterView = [UIView new];
+    self.tableView.decelerationRate = self.isStrMode ? UIScrollViewDecelerationRateFast : UIScrollViewDecelerationRateNormal;
+    if (@available(iOS 15.0, *)) self.tableView.sectionHeaderTopPadding = 0;
     UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
     longPress.minimumPressDuration = 0.5;
     longPress.delegate = self;
     [self.tableView addGestureRecognizer:longPress];
-    
     [self.view addSubview:self.tableView];
-    
     UILayoutGuide *g = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor], 
+        [card.topAnchor constraintEqualToAnchor:g.topAnchor constant:12],
+        [card.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:16],
+        [card.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-16],
+        [stack.topAnchor constraintEqualToAnchor:card.topAnchor constant:8],
+        [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-12],
+        [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:12],
+        [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-12],
+        [self.typeSegment.heightAnchor constraintEqualToConstant:44],
+        [self.tableView.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:8],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:g.bottomAnchor],
         [self.tableView.leadingAnchor constraintEqualToAnchor:g.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:g.trailingAnchor]
     ]];
-    
     UIBarButtonItem *moreBtn = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showNavMenu)];
+    moreBtn.accessibilityLabel = TR(@"Common_More");
     self.navigationItem.rightBarButtonItem = moreBtn;
     self.originalRightBarButton = moreBtn;
-    
+    [self updateBaseAddressLabel];
+}
+
+- (void)updateBaseAddressLabel {
+    self.baseAddressLabel.text = [NSString stringWithFormat:@"0x%llX", self.targetAddress];
 }
 
 - (void)updateTypeSize {
-    
+
     static const VMDataType typeMap[] = {
       VMDataTypeInt8, VMDataTypeInt16, VMDataTypeInt32, VMDataTypeInt64,
       VMDataTypeFloat, VMDataTypeDouble, VMDataTypeString
@@ -228,7 +281,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
           ? UIScrollViewDecelerationRateFast
           : UIScrollViewDecelerationRateNormal;
     }
-    
+
     switch (self.type) {
       case VMDataTypeInt8: self.typeSize = 1; break;
       case VMDataTypeInt16: self.typeSize = 2; break;
@@ -246,8 +299,8 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         [self.tableView reloadData];
         [self scrollToTargetAndHighlight];
     } else {
-        self.minAddr = self.targetAddress - (PAGE_COUNT * self.typeSize);
-        self.maxAddr = self.targetAddress + (PAGE_COUNT * self.typeSize);
+        self.minAddr = self.targetAddress - MIN(self.targetAddress, (uint64_t)(PAGE_COUNT * self.typeSize));
+        self.maxAddr = self.targetAddress + MIN(UINT64_MAX - self.targetAddress, (uint64_t)(PAGE_COUNT * self.typeSize));
         self.dataList = [NSMutableArray array];
         [self loadInitialData];
         [self.tableView reloadData];
@@ -256,6 +309,9 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 }
 
 - (void)loadInitialData {
+    self.loadGeneration++;
+    self.isLoading = NO;
+    [self updateBaseAddressLabel];
     int totalRows = (int)((self.maxAddr - self.minAddr) / self.typeSize);
     for (int i = 0; i <= totalRows; i++) {
         uint64_t addr = self.minAddr + (i * self.typeSize);
@@ -272,14 +328,17 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 #define STR_MAX_LEN 256
 
 - (void)loadStrData {
+    self.loadGeneration++;
+    self.isLoading = NO;
+    [self updateBaseAddressLabel];
     self.strDataList = [NSMutableArray array];
-    
-    uint64_t scanStart = (self.targetAddress > STR_SCAN_RANGE) ? (self.targetAddress - STR_SCAN_RANGE) : 0x100000000;
-    uint64_t scanEnd = self.targetAddress + STR_SCAN_RANGE;
-    
+
+    uint64_t scanStart = (self.targetAddress > STR_SCAN_RANGE) ? (self.targetAddress - STR_SCAN_RANGE) : 0;
+    uint64_t scanEnd = self.targetAddress + MIN(UINT64_MAX - self.targetAddress, (uint64_t)STR_SCAN_RANGE);
+
     self.strMinAddr = scanStart;
     self.strMaxAddr = scanEnd;
-    
+
     VMScanResultItem *targetItem = [self stringItemAtAddress:self.targetAddress fallback:nil];
     if (targetItem) {
         [self.strDataList addObject:targetItem];
@@ -299,29 +358,37 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         }
         [self.strDataList addObject:item];
     }
+    [self.strDataList sortUsingComparator:^NSComparisonResult(VMScanResultItem *a, VMScanResultItem *b) {
+        return [@(a.address) compare:@(b.address)];
+    }];
 }
 
 - (void)loadMoreStrData:(BOOL)next {
     if (self.isLoading) return;
     self.isLoading = YES;
-    
+
     uint64_t rangeSize = STR_SCAN_RANGE;
     uint64_t scanStart, scanEnd;
-    
+
     if (next) {
         scanStart = self.strMaxAddr;
-        scanEnd = self.strMaxAddr + rangeSize;
+        scanEnd = self.strMaxAddr + MIN(UINT64_MAX - self.strMaxAddr, rangeSize);
         self.strMaxAddr = scanEnd;
     } else {
         scanEnd = self.strMinAddr;
-        scanStart = (self.strMinAddr > rangeSize) ? (self.strMinAddr - rangeSize) : 0x100000000;
+        scanStart = (self.strMinAddr > rangeSize) ? (self.strMinAddr - rangeSize) : 0;
         self.strMinAddr = scanStart;
     }
-    
+
+    NSUInteger generation = self.loadGeneration;
+    pid_t targetPid = [VMMemoryEngine shared].targetPid;
+    mach_port_t targetTask = [VMMemoryEngine shared].targetTask;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSArray *results = [self scanStringsFrom:scanStart to:scanEnd];
-        
+
         dispatch_async(dispatch_get_main_queue(), ^{
+            if (generation != self.loadGeneration) return;
+            if (targetPid != [VMMemoryEngine shared].targetPid || targetTask != [VMMemoryEngine shared].targetTask) { self.isLoading = NO; return; }
             if (results.count > 0) {
                 if (next) {
                     [self.strDataList addObjectsFromArray:results];
@@ -349,12 +416,12 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 - (NSArray *)scanStringsFrom:(uint64_t)scanStart to:(uint64_t)scanEnd {
     NSMutableArray *results = [NSMutableArray array];
     VMMemoryEngine *eng = [VMMemoryEngine shared];
-    
+
     uint64_t pageSize = 0x4000;
     NSMutableData *fullData = [NSMutableData data];
     uint64_t actualStart = scanEnd;
-    
-    for (uint64_t addr = scanStart; addr < scanEnd; addr += pageSize) {
+
+    for (uint64_t addr = scanStart; addr < scanEnd; addr += MIN(pageSize, scanEnd - addr)) {
         uint64_t chunkLen = MIN(pageSize, scanEnd - addr);
         NSData *chunk = [eng readRawMemory:addr length:(NSUInteger)chunkLen];
         if (chunk && chunk.length > 0) {
@@ -369,13 +436,13 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
             [fullData appendData:chunk];
         }
     }
-    
+
     if (fullData.length == 0) return results;
-    
+
     const uint8_t *bytes = (const uint8_t *)fullData.bytes;
     NSUInteger len = fullData.length;
     NSUInteger i = 0;
-    
+
     while (i < len) {
         if ([self isPrintableByte:bytes[i]]) {
             NSUInteger start = i;
@@ -541,6 +608,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 }
 
 - (void)showNavMenu {
+    if (![self browsingTargetIsValid]) { [self checkBrowsingTarget]; return; }
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:TR(@"Pop_Options") message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     VMMemoryEngine *engine = [VMMemoryEngine shared];
     if ([engine canUndoLastManualWriteBatch]) {
@@ -551,6 +619,11 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
             NSUInteger restored = [engine undoLastManualWriteBatch];
             [self refreshCurrentData];
             [self showToast:restored > 0 ? TR(@"Undo_Success") : TR(@"Undo_Failed")];
+        }]];
+    }
+    if (!self.isStrMode) {
+        [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Batch_Select") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self enterMultiSelectMode];
         }]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Mod_Results_Refreshed") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
@@ -570,23 +643,28 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 }
 
 - (void)promptJump {
+    if (![self browsingTargetIsValid]) { [self checkBrowsingTarget]; return; }
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Btn_Jump") message:@"0x..." preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.keyboardType = UIKeyboardTypeASCIICapable;
         tf.placeholder = @"0x1234 / 1234";
     }];
     [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        
+
         NSString *txt = alert.textFields.firstObject.text;
-        
+
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            uint64_t addr = VMParseAddressInput(txt);
+            uint64_t addr = 0;
+            if (!VMParseBrowserInteger(txt, NO, &addr, NULL) || addr == 0) {
+                [self showToast:TR(@"Ptr_Error_Invalid_Target")];
+                return;
+            }
             self.targetAddress = addr;
             if (self.isStrMode) {
                 [self loadStrData];
             } else {
-                self.minAddr = self.targetAddress - (PAGE_COUNT * self.typeSize);
-                self.maxAddr = self.targetAddress + (PAGE_COUNT * self.typeSize);
+                self.minAddr = self.targetAddress - MIN(self.targetAddress, (uint64_t)(PAGE_COUNT * self.typeSize));
+                self.maxAddr = self.targetAddress + MIN(UINT64_MAX - self.targetAddress, (uint64_t)(PAGE_COUNT * self.typeSize));
                 self.dataList = [NSMutableArray array];
                 [self loadInitialData];
             }
@@ -599,6 +677,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 }
 
 - (void)promptJumpOffset {
+    if (![self browsingTargetIsValid]) { [self checkBrowsingTarget]; return; }
     NSString *msg = [NSString stringWithFormat:TR(@"Browser_Jump_Offset_Msg"), self.targetAddress];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Browser_Jump_Offset") message:msg preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
@@ -608,18 +687,20 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         NSString *input = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (input.length == 0) return;
-        
-        int64_t offset = VMParseSignedOffsetInput(input);
-        
-        uint64_t newAddr = self.targetAddress + offset;
-        
+
+        uint64_t newAddr = 0;
+        if (!VMResolveBrowserOffset(input, self.targetAddress, &newAddr) || newAddr == 0) {
+            [self showToast:TR(@"Ptr_Error_Invalid_Target")];
+            return;
+        }
+
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             self.targetAddress = newAddr;
             if (self.isStrMode) {
                 [self loadStrData];
             } else {
-                self.minAddr = self.targetAddress - (PAGE_COUNT * self.typeSize);
-                self.maxAddr = self.targetAddress + (PAGE_COUNT * self.typeSize);
+                self.minAddr = self.targetAddress - MIN(self.targetAddress, (uint64_t)(PAGE_COUNT * self.typeSize));
+                self.maxAddr = self.targetAddress + MIN(UINT64_MAX - self.targetAddress, (uint64_t)(PAGE_COUNT * self.typeSize));
                 self.dataList = [NSMutableArray array];
                 [self loadInitialData];
             }
@@ -633,11 +714,11 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
     if (self.isLoading || self.isInitialLoad) return;
-    
+
     CGFloat y = scrollView.contentOffset.y;
     CGFloat h = scrollView.frame.size.height;
     CGFloat contentH = scrollView.contentSize.height;
-    
+
     if (self.isStrMode) {
         if (!scrollView.isDragging) return;
         CGFloat velocityY = [scrollView.panGestureRecognizer velocityInView:scrollView].y;
@@ -648,7 +729,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         }
         return;
     }
-    
+
     if (y < PRELOAD_THRESHOLD) {
         [self loadMoreData:NO];
     }
@@ -674,96 +755,50 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 
 - (void)loadMoreData:(BOOL)next {
     if (self.isLoading) return;
+    const int step = self.typeSize;
+    const VMDataType type = self.type;
+    const uint64_t boundary = next ? self.maxAddr : self.minAddr;
+    NSUInteger count = MIN((uint64_t)PAGE_COUNT, (next ? UINT64_MAX - boundary : boundary) / step);
+    if (count == 0) return;
     self.isLoading = YES;
-    
+    const NSUInteger generation = self.loadGeneration;
+    const pid_t pid = [VMMemoryEngine shared].targetPid;
+    const mach_port_t task = [VMMemoryEngine shared].targetTask;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSMutableArray *newRows = [NSMutableArray array];
-        int count = PAGE_COUNT;
-        
-        if (next) {
-            
-            for (int i = 1; i <= count; i++) {
-                uint64_t addr = self.maxAddr + (i * self.typeSize);
-                NSString *val = [[VMMemoryEngine shared] readAddress:addr type:self.type];
-                VMScanResultItem *item = [VMScanResultItem new];
-                item.address = addr; item.valueStr = val;
-                [newRows addObject:item];
-            }
-        } else {
-            
-            for (int i = count; i >= 1; i--) {
-                uint64_t addr = self.minAddr - (i * self.typeSize);
-                NSString *val = [[VMMemoryEngine shared] readAddress:addr type:self.type];
-                VMScanResultItem *item = [VMScanResultItem new];
-                item.address = addr; item.valueStr = val;
-                [newRows addObject:item];
-            }
+        NSMutableArray *newRows = [NSMutableArray arrayWithCapacity:count];
+        for (NSUInteger i = 0; i < count; i++) {
+            if (pid != [VMMemoryEngine shared].targetPid || task != [VMMemoryEngine shared].targetTask) break;
+            uint64_t addr = next ? boundary + (i + 1) * step : boundary - (count - i) * step;
+            VMScanResultItem *item = [VMScanResultItem new];
+            item.address = addr;
+            item.valueStr = [[VMMemoryEngine shared] readAddress:addr type:type];
+            [newRows addObject:item];
         }
-        
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (newRows.count == 0) {
-                self.isLoading = NO;
-                return;
+            if (generation != self.loadGeneration) return;
+            self.isLoading = NO;
+            if (pid != [VMMemoryEngine shared].targetPid || task != [VMMemoryEngine shared].targetTask || newRows.count == 0) return;
+            CGPoint offset = self.tableView.contentOffset;
+            NSInteger offsetRows = 0;
+            if (next) [self.dataList addObjectsFromArray:newRows];
+            else {
+                [self.dataList insertObjects:newRows atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, newRows.count)]];
+                offsetRows = newRows.count;
             }
-            
-            if (next) {
-                
-                NSInteger startIdx = self.dataList.count;
-                [self.dataList addObjectsFromArray:newRows];
-                self.maxAddr = ((VMScanResultItem *)newRows.lastObject).address;
-                
-                NSMutableArray *indexPaths = [NSMutableArray arrayWithCapacity:newRows.count];
-                for (NSInteger i = 0; i < newRows.count; i++) {
-                    [indexPaths addObject:[NSIndexPath indexPathForRow:startIdx + i inSection:0]];
-                }
-                
-                [CATransaction begin];
-                [CATransaction setDisableActions:YES];
-                [self.tableView insertRowsAtIndexPaths:indexPaths withRowAnimation:UITableViewRowAnimationNone];
-                [CATransaction commit];
-                
-                if (self.dataList.count > MAX_BUFFER_ROWS) {
-                    NSInteger removeCount = self.dataList.count - MAX_BUFFER_ROWS;
-                    [self.dataList removeObjectsInRange:NSMakeRange(0, removeCount)];
-                    self.minAddr = ((VMScanResultItem *)self.dataList.firstObject).address;
-                    
-                    CGFloat removedHeight = removeCount * ROW_HEIGHT;
-                    CGPoint curr = self.tableView.contentOffset;
-                    CGFloat newY = MAX(0, curr.y - removedHeight);
-                    
-                    [CATransaction begin];
-                    [CATransaction setDisableActions:YES];
-                    [self.tableView reloadData];
-                    [self.tableView setContentOffset:CGPointMake(curr.x, newY) animated:NO];
-                    [CATransaction commit];
-                }
-                
-            } else {
-                
-                NSIndexSet *idxSet = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, newRows.count)];
-                [self.dataList insertObjects:newRows atIndexes:idxSet];
-                self.minAddr = ((VMScanResultItem *)newRows.firstObject).address;
-                
-                NSMutableArray *indexPaths = [NSMutableArray arrayWithCapacity:newRows.count];
-                for (NSInteger i = 0; i < newRows.count; i++) {
-                    [indexPaths addObject:[NSIndexPath indexPathForRow:i inSection:0]];
-                }
-                
-                [CATransaction begin];
-                [CATransaction setDisableActions:YES];
-                [self.tableView insertRowsAtIndexPaths:indexPaths withRowAnimation:UITableViewRowAnimationNone];
-                [CATransaction commit];
-                
-                if (self.dataList.count > MAX_BUFFER_ROWS) {
-                    [self.dataList removeObjectsInRange:NSMakeRange(MAX_BUFFER_ROWS, self.dataList.count - MAX_BUFFER_ROWS)];
-                    self.maxAddr = ((VMScanResultItem *)self.dataList.lastObject).address;
-                    [self.tableView reloadData];
-                }
+            if (self.dataList.count > MAX_BUFFER_ROWS) {
+                NSUInteger extra = self.dataList.count - MAX_BUFFER_ROWS;
+                [self.dataList removeObjectsInRange:NSMakeRange(next ? 0 : MAX_BUFFER_ROWS, extra)];
+                if (next) offsetRows -= extra;
             }
-            
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                self.isLoading = NO;
-            });
+            self.minAddr = ((VMScanResultItem *)self.dataList.firstObject).address;
+            self.maxAddr = ((VMScanResultItem *)self.dataList.lastObject).address;
+            self.isLoading = YES;
+            [UIView performWithoutAnimation:^{
+                [self.tableView reloadData];
+                [self.tableView layoutIfNeeded];
+                self.tableView.contentOffset = CGPointMake(offset.x, offset.y + offsetRows * ROW_HEIGHT);
+            }];
+            self.isLoading = NO;
         });
     });
 }
@@ -775,18 +810,18 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         VMScanResultItem *item = list[i];
         if (item.address == self.targetAddress) { targetIndex = i; break; }
     }
-    
+
     if (targetIndex >= 0) {
         NSIndexPath *indexPath = [NSIndexPath indexPathForRow:targetIndex inSection:0];
         [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
-        
+
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
             if (cell) {
                 UIView *bgView = [[UIView alloc] initWithFrame:cell.bounds];
                 bgView.backgroundColor = [[UIColor systemYellowColor] colorWithAlphaComponent:0.3];
                 [cell insertSubview:bgView atIndex:0];
-                
+
                 [UIView animateWithDuration:1.0 delay:0.5 options:UIViewAnimationOptionCurveEaseOut animations:^{
                     bgView.alpha = 0;
                 } completion:^(BOOL finished) {
@@ -805,7 +840,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         static NSString *strIdent = @"BrowserStrCell";
         UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:strIdent];
         if (!cell) {
-            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:strIdent];
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:strIdent];
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
             cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
         }
@@ -815,7 +850,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         NSString *display = item.valueStr;
         if (display.length > 40) display = [[display substringToIndex:40] stringByAppendingString:@"..."];
         cell.detailTextLabel.text = [NSString stringWithFormat:@"\"%@\"", display];
-        cell.detailTextLabel.textColor = [UIColor systemGreenColor];
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
         cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
         cell.backgroundColor = isTargetRow
@@ -833,6 +868,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         addrLabel.tag = 301;
         addrLabel.numberOfLines = 2;
         addrLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        addrLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [cell.contentView addSubview:addrLabel];
 
         UILabel *valueLabel = [[UILabel alloc] init];
@@ -840,23 +876,37 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         valueLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
         valueLabel.textAlignment = NSTextAlignmentRight;
         valueLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        valueLabel.adjustsFontSizeToFitWidth = YES;
+        valueLabel.minimumScaleFactor = 0.9;
+        valueLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [cell.contentView addSubview:valueLabel];
+        [valueLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        [addrLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+        NSLayoutConstraint *minimumValueWidth = [valueLabel.widthAnchor constraintGreaterThanOrEqualToConstant:104];
+        minimumValueWidth.priority = UILayoutPriorityDefaultHigh;
+        [NSLayoutConstraint activateConstraints:@[
+            [addrLabel.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:16],
+            [addrLabel.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:4],
+            [addrLabel.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-4],
+            [addrLabel.trailingAnchor constraintEqualToAnchor:valueLabel.leadingAnchor constant:-8],
+            [valueLabel.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16],
+            [valueLabel.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            [valueLabel.widthAnchor constraintLessThanOrEqualToAnchor:cell.contentView.widthAnchor multiplier:0.58 constant:-16],
+            minimumValueWidth
+        ]];
     }
-    
+
     VMScanResultItem *item = self.dataList[indexPath.row];
     UILabel *addrLabel = [cell.contentView viewWithTag:301];
     UILabel *valueLabel = [cell.contentView viewWithTag:302];
 
-    CGFloat contentWidth = tableView.bounds.size.width - 16;
-    CGFloat valueWidth = MIN(140.0, MAX(96.0, contentWidth * 0.34));
-    CGFloat addrWidth = MAX(80.0, contentWidth - valueWidth - 8.0);
-    addrLabel.frame = CGRectMake(8, 2, addrWidth, ROW_HEIGHT - 4);
-    valueLabel.frame = CGRectMake(8 + addrWidth + 8, 0, valueWidth - 8, ROW_HEIGHT);
-
     valueLabel.text = item.valueStr;
     BOOL isSelected = self.isMultiSelectMode && [self.selectedAddresses containsObject:@(item.address)];
     BOOL isTargetRow = item.address == self.targetAddress;
-    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.accessoryType = isSelected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    cell.isAccessibilityElement = YES;
+    cell.accessibilityLabel = [NSString stringWithFormat:@"0x%llX, %@", item.address, item.valueStr ?: @""];
+    cell.accessibilityTraits = UIAccessibilityTraitButton | (isSelected ? UIAccessibilityTraitSelected : 0);
 
     if (isTargetRow) {
         UIColor *targetColor = isSelected
@@ -867,7 +917,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         valueLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightBold];
         valueLabel.textColor = [UIColor labelColor];
     } else if (isSelected) {
-        cell.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.12];
+        cell.backgroundColor = [[VMUIHelper accentColor] colorWithAlphaComponent:0.12];
         addrLabel.attributedText = VMBrowserAddressText(item.address, self.targetAddress, YES);
         valueLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightSemibold];
         valueLabel.textColor = [UIColor labelColor];
@@ -875,15 +925,15 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         cell.backgroundColor = [UIColor clearColor];
         addrLabel.attributedText = VMBrowserAddressText(item.address, self.targetAddress, NO);
         valueLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
-        valueLabel.textColor = [UIColor systemBlueColor];
+        valueLabel.textColor = [VMUIHelper accentColor];
     }
-    
+
     return cell;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    
+
     if (self.isStrMode) {
         VMScanResultItem *item = self.strDataList[indexPath.row];
         NSString *liveVal = [self readVisibleStringAtAddress:item.address
@@ -901,9 +951,9 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
                                             extraItem:nil];
         return;
     }
-    
+
     VMScanResultItem *item = self.dataList[indexPath.row];
-    
+
     if (self.isMultiSelectMode) {
         NSNumber *addrNum = @(item.address);
         if ([self.selectedAddresses containsObject:addrNum]) {
@@ -915,21 +965,21 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         [self updateMultiSelectTitle];
         return;
     }
-    
+
     NSString *liveVal = [[VMMemoryEngine shared] readAddress:item.address type:self.type];
-    
+
     CGRect rect = [tableView rectForRowAtIndexPath:indexPath];
-    
+
     if (CGRectIsEmpty(rect) || CGRectIsNull(rect)) {
         rect = CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 1, 1);
     }
-    
-    [VMMemoryActionSheet showActionSheetForAddress:item.address 
-                                             value:liveVal 
-                                          dataType:self.type 
-                                fromViewController:self 
-                                        sourceView:tableView 
-                                        sourceRect:rect 
+
+    [VMMemoryActionSheet showActionSheetForAddress:item.address
+                                             value:liveVal
+                                          dataType:self.type
+                                fromViewController:self
+                                        sourceView:tableView
+                                        sourceRect:rect
                                          extraItem:nil];
 }
 
@@ -938,15 +988,16 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Browser_Str_Edit") message:msg preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.text = item.valueStr;
+        tf.placeholder = TR(@"Mod_Input_Str");
         tf.keyboardType = UIKeyboardTypeDefault;
         tf.clearButtonMode = UITextFieldViewModeAlways;
     }];
-    
+
     __weak __typeof(self) weakSelf = self;
     [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         NSString *newVal = alert.textFields.firstObject.text ?: @"";
         NSUInteger newLen = [newVal lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-        
+
         if (newLen > item.originalSize) {
             NSString *warnMsg = [NSString stringWithFormat:TR(@"Browser_Str_Overflow_Msg"), (unsigned long)item.originalSize, (unsigned long)newLen];
             UIAlertController *warn = [UIAlertController alertControllerWithTitle:TR(@"Browser_Str_Overflow") message:warnMsg preferredStyle:UIAlertControllerStyleAlert];
@@ -968,7 +1019,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     NSUInteger writeLen = strlen(cstr) + 1;
     NSMutableData *data = [NSMutableData dataWithBytes:cstr length:writeLen];
     [[VMMemoryEngine shared] writeRawData:data toAddress:item.address];
-    
+
     item.valueStr = newVal;
     item.originalSize = writeLen - 1;
     [self.tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
@@ -977,53 +1028,52 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 - (void)showPointerOffsetJumpAlert:(uint64_t)currentAddr {
     NSString *ptrValStr = [[VMMemoryEngine shared] readAddress:currentAddr type:VMDataTypeInt64];
     uint64_t basePtr = strtoull([ptrValStr UTF8String], NULL, 10);
-    
+
     if (basePtr < 0x10000) {
         [self showToast:TR(@"Err_Invalid_Base_Ptr")];
         return;
     }
-    
+
     NSString *msg = [NSString stringWithFormat:TR(@"Browser_Ptr_Base_Msg"), basePtr];
-    
+
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Browser_Jump_Ptr_Offset") message:msg preferredStyle:UIAlertControllerStyleAlert];
-    
+
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.placeholder = TR(@"Browser_Jump_Chain_Hint");
         tf.keyboardType = UIKeyboardTypeASCIICapable;
         tf.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
     }];
-    
+
     [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Jump") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        int64_t offset = VMParseSignedOffsetInput(alert.textFields.firstObject.text);
-        uint64_t finalAddr = offset >= 0 ? basePtr + (uint64_t)offset : basePtr - (uint64_t)(-offset);
-        
+        uint64_t finalAddr = 0;
+        if (!VMResolveBrowserOffset(alert.textFields.firstObject.text, basePtr, &finalAddr) || finalAddr == 0) {
+            [self showToast:TR(@"Ptr_Error_Invalid_Target")];
+            return;
+        }
+
         [self performJumpToAddress:finalAddr];
         [self showToast:[NSString stringWithFormat:TR(@"Msg_Jump_To_Fmt"), finalAddr]];
     }]];
-    
+
     [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    
+
     [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)performJumpToAddress:(uint64_t)addr {
     self.targetAddress = addr;
-    self.minAddr = self.targetAddress - (100 * self.typeSize);
-    self.maxAddr = self.targetAddress + (100 * self.typeSize);
+    self.minAddr = self.targetAddress - MIN(self.targetAddress, (uint64_t)(PAGE_COUNT * self.typeSize));
+    self.maxAddr = self.targetAddress + MIN(UINT64_MAX - self.targetAddress, (uint64_t)(PAGE_COUNT * self.typeSize));
     self.dataList = [NSMutableArray array];
-    
+
     [self loadInitialData];
     [self.tableView reloadData];
-    
+
     [self scrollToTargetAndHighlight];
 }
 
 - (void)showToast:(NSString *)msg {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:nil message:msg preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:alert animated:YES completion:nil];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [alert dismissViewControllerAnimated:YES completion:nil];
-    });
+    VMMemoryShowFeedback(self, msg);
 }
 
 - (void)showEditAlertForItem:(VMScanResultItem *)item indexPath:(NSIndexPath *)indexPath {
@@ -1031,6 +1081,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Alert_Edit_Val") message:msg preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf){
         tf.text = item.valueStr;
+        tf.placeholder = TR(@"Mod_Input_Value_Placeholder");
         tf.keyboardType = UIKeyboardTypeDecimalPad;
     }];
     [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
@@ -1046,16 +1097,17 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 #pragma mark - Multi-Select Mode
 
 - (void)handleLongPress:(UILongPressGestureRecognizer *)gesture {
+    if (![self browsingTargetIsValid]) return;
     if (gesture.state != UIGestureRecognizerStateBegan) return;
     if (self.isMultiSelectMode) return;
     if (self.isStrMode) return;
-    
+
     CGPoint point = [gesture locationInView:self.tableView];
     NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:point];
     if (!indexPath) return;
-    
+
     [self enterMultiSelectMode];
-    
+
     VMScanResultItem *item = self.dataList[indexPath.row];
     [self.selectedAddresses addObject:@(item.address)];
     [self.tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
@@ -1063,30 +1115,32 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 }
 
 - (void)enterMultiSelectMode {
+    if (![self browsingTargetIsValid]) return;
     self.isMultiSelectMode = YES;
     [self.selectedAddresses removeAllObjects];
-    
-    self.navigationItem.titleView = nil;
+
+    self.typeSegment.enabled = NO;
     [self updateMultiSelectTitle];
-    
+
     UIBarButtonItem *actionBtn = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showMultiSelectActions)];
+    actionBtn.accessibilityLabel = TR(@"Common_More");
     UIBarButtonItem *cancelBtn = [[UIBarButtonItem alloc] initWithTitle:TR(@"Btn_Cancel") style:UIBarButtonItemStylePlain target:self action:@selector(exitMultiSelectMode)];
     self.navigationItem.rightBarButtonItems = @[actionBtn, cancelBtn];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:TR(@"Browser_Select_All") style:UIBarButtonItemStylePlain target:self action:@selector(selectAllVisible)];
-    
+
     [self.tableView reloadData];
 }
 
 - (void)exitMultiSelectMode {
     self.isMultiSelectMode = NO;
     [self.selectedAddresses removeAllObjects];
-    
-    self.navigationItem.titleView = self.typeSegment;
+
+    self.typeSegment.enabled = YES;
     self.navigationItem.rightBarButtonItems = nil;
     self.navigationItem.rightBarButtonItem = self.originalRightBarButton;
     self.navigationItem.leftBarButtonItem = nil;
-    self.title = nil;
-    
+    self.title = TR(@"Mod_Menu_Value");
+
     [self.tableView reloadData];
 }
 
@@ -1108,7 +1162,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         [self showToast:TR(@"Browser_No_Selection")];
         return;
     }
-    
+
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:TR(@"Browser_Selected_Count"), (unsigned long)self.selectedAddresses.count] message:nil preferredStyle:UIAlertControllerStyleActionSheet];
 
     [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Mod_Batch_Fixed_Btn") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
@@ -1118,25 +1172,25 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Mod_Batch_Seq_Btn") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self showBatchModifyInputWithMode:1];
     }]];
-    
+
     [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Browser_Batch_Fav") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self batchAddToFavorites];
     }]];
-    
+
     [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Browser_Batch_Lock") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self batchAddToLock];
     }]];
-    
+
     [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Browser_Copy_Addrs") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self copySelectedAddresses];
     }]];
-    
+
     [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    
+
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
         sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItems.firstObject;
     }
-    
+
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
@@ -1172,6 +1226,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 }
 
 - (void)executeBatchModifyWithInput:(NSString *)input mode:(NSInteger)mode {
+    if (![self browsingTargetIsValid]) { [self checkBrowsingTarget]; return; }
     NSArray<NSNumber *> *sortedAddrs = [self sortedSelectedBrowserAddresses];
     NSMutableArray<NSDictionary *> *writes = [NSMutableArray arrayWithCapacity:sortedAddrs.count];
 
@@ -1207,7 +1262,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 - (void)batchAddToFavorites {
     NSString *bundleID = [[VMMemoryEngine shared] currentBundleID];
     NSUInteger addedCount = 0;
-    
+
     for (NSNumber *addrNum in self.selectedAddresses) {
         uint64_t addr = [addrNum unsignedLongLongValue];
         if (![[VMFavoriteManager shared] isFavorite:addr forApp:bundleID]) {
@@ -1220,7 +1275,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
             addedCount++;
         }
     }
-    
+
     [self showToast:[NSString stringWithFormat:TR(@"Browser_Batch_Added"), (unsigned long)addedCount]];
     [self exitMultiSelectMode];
 }
@@ -1228,10 +1283,10 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 - (void)batchAddToLock {
     NSUInteger addedCount = 0;
     NSMutableArray *lockedItems = [VMMemoryEngine shared].lockedItems;
-    
+
     for (NSNumber *addrNum in self.selectedAddresses) {
         uint64_t addr = [addrNum unsignedLongLongValue];
-        
+
         BOOL alreadyLocked = NO;
         for (NSDictionary *item in lockedItems) {
             if ([item[@"addr"] unsignedLongLongValue] == addr) {
@@ -1239,10 +1294,10 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
                 break;
             }
         }
-        
+
         if (!alreadyLocked) {
             NSString *val = [[VMMemoryEngine shared] readAddress:addr type:self.type];
-            
+
             [[VMLockEngine shared] addAddressLock:addr
                                             value:val ?: @"0"
                                              type:(int)self.type
@@ -1250,23 +1305,23 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
             addedCount++;
         }
     }
-    
+
     [self showToast:[NSString stringWithFormat:TR(@"Browser_Batch_Added"), (unsigned long)addedCount]];
     [self exitMultiSelectMode];
 }
 
 - (void)copySelectedAddresses {
     NSMutableArray *addrStrings = [NSMutableArray array];
-    
+
     NSArray *sortedAddrs = [self sortedSelectedBrowserAddresses];
-    
+
     for (NSNumber *addrNum in sortedAddrs) {
         [addrStrings addObject:[NSString stringWithFormat:@"0x%llX", [addrNum unsignedLongLongValue]]];
     }
-    
+
     NSString *result = [addrStrings componentsJoinedByString:@"\n"];
     [[UIPasteboard generalPasteboard] setString:result];
-    
+
     [self showToast:[NSString stringWithFormat:TR(@"Browser_Addrs_Copied"), (unsigned long)self.selectedAddresses.count]];
     [self exitMultiSelectMode];
 }

@@ -11,9 +11,9 @@
 @implementation VMModuleListViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = TR(@"Patch_Select_Msg"); 
-    self.view.backgroundColor = [UIColor systemBackgroundColor];
-    
+    self.title = TR(@"RVA_Select_Hint");
+    self.view.backgroundColor = [VMUIHelper canvasColor];
+
     [self setupUI];
     [self loadData];
 }
@@ -24,32 +24,44 @@
     self.searchBar.delegate = self;
     self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
 
-    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
+    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
+    self.tableView.showsHorizontalScrollIndicator = NO;
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
+    [VMUIHelper styleTableView:self.tableView];
+    self.tableView.rowHeight = 72;
     self.tableView.tableHeaderView = self.searchBar;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
     [self.view addSubview:self.tableView];
 
-    [VMUIHelper addFixedFooterTo:self forTableView:self.tableView];
+
 }
 
 - (void)loadData {
+    self.tableView.backgroundView = [VMUIHelper emptyStateWithTitle:TR(@"Pull_Loading") message:nil symbol:@"shippingbox"];
+    pid_t pid = [VMMemoryEngine shared].targetPid;
+    mach_port_t task = [VMMemoryEngine shared].targetTask;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        self.allModules = [[VMMemoryEngine shared] loadRemoteModules];
-
-        self.allModules = [self.allModules sortedArrayUsingComparator:^NSComparisonResult(VMModuleInfo *obj1, VMModuleInfo *obj2) {
-            return [@(obj2.size) compare:@(obj1.size)];
+        NSArray *modules = [[[VMMemoryEngine shared] loadRemoteModules] sortedArrayUsingComparator:^NSComparisonResult(VMModuleInfo *a, VMModuleInfo *b) {
+            return [@(b.size) compare:@(a.size)];
         }];
-
-        self.displayedModules = self.allModules;
-
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self.tableView reloadData];
+            self.allModules = (pid == [VMMemoryEngine shared].targetPid && task == [VMMemoryEngine shared].targetTask) ? modules : @[];
+            [self searchBar:self.searchBar textDidChange:self.searchBar.text ?: @""];
         });
     });
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    CGRect frame = self.searchBar.frame;
+    if (frame.size.width != self.tableView.bounds.size.width) {
+        frame.size.width = self.tableView.bounds.size.width;
+        self.searchBar.frame = frame;
+        self.tableView.tableHeaderView = self.searchBar;
+    }
 }
 
 #pragma mark - Search Logic
@@ -60,6 +72,7 @@
         NSPredicate *pred = [NSPredicate predicateWithFormat:@"name CONTAINS[c] %@", searchText];
         self.displayedModules = [self.allModules filteredArrayUsingPredicate:pred];
     }
+    self.tableView.backgroundView = self.displayedModules.count ? nil : [VMUIHelper emptyStateWithTitle:TR(@"Sig_No_Match") message:TR(@"Patch_Search_Placeholder") symbol:@"magnifyingglass"];
     [self.tableView reloadData];
 }
 
@@ -69,7 +82,7 @@
 
 #pragma mark - TableView Delegate
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 2; 
+    return 2;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -88,10 +101,11 @@
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cid];
     }
-    
+
     if (indexPath.section == 0) {
-        cell.textLabel.text = @"Auto Search";
-        cell.textLabel.textColor = [UIColor systemBlueColor];
+        cell.textLabel.text = TR(@"Sig_Global_Search");
+        cell.imageView.tintColor = [VMUIHelper accentColor];
+        cell.textLabel.textColor = [VMUIHelper accentColor];
         cell.textLabel.font = [UIFont boldSystemFontOfSize:16];
         cell.detailTextLabel.text = TR(@"Mod_Search_All_Regions");
         cell.imageView.image = [UIImage systemImageNamed:@"square.stack.3d.up"];
@@ -100,10 +114,10 @@
         cell.textLabel.text = info.name;
         cell.textLabel.textColor = [UIColor labelColor];
         cell.textLabel.font = [UIFont systemFontOfSize:16];
-        
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"0x%llX (Size: %@)", info.loadAddress, [NSByteCountFormatter stringFromByteCount:info.size countStyle:NSByteCountFormatterCountStyleMemory]];
+
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"0x%llX · %@", info.loadAddress, [NSByteCountFormatter stringFromByteCount:info.size countStyle:NSByteCountFormatterCountStyleMemory]];
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-        
+
         if (info.loadAddress == [VMMemoryEngine shared].mainModuleAddress) {
             cell.imageView.image = [UIImage systemImageNamed:@"star.circle.fill"];
             cell.imageView.tintColor = [UIColor systemOrangeColor];
@@ -112,22 +126,26 @@
             cell.imageView.tintColor = [UIColor systemGrayColor];
         }
     }
-    
+
+    cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+    cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    cell.accessibilityTraits = UIAccessibilityTraitButton;
     return cell;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    
+
     VMModuleInfo *selected = nil;
     if (indexPath.section == 1) {
         selected = self.displayedModules[indexPath.row];
     }
-    
+
     if (self.selectionHandler) {
         self.selectionHandler(selected);
     }
-    
+
     [self.navigationController popViewControllerAnimated:YES];
 }
 

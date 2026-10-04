@@ -20,6 +20,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 @implementation VMBackupListViewController
 - (void)viewDidLoad {
   [super viewDidLoad];
+  [VMUIHelper styleTableView:self.tableView];
+  self.view.tintColor = [VMUIHelper accentColor];
   self.folderList = [NSMutableArray array];
   self.folderMetadata = [NSMutableDictionary dictionary];
   if (self.bid && self.bid.length > 0) {
@@ -35,6 +37,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
               style:UIBarButtonItemStylePlain
              target:self
              action:@selector(importBackupAction)];
+  importBtn.accessibilityLabel = TR(@"Act_Import");
   self.navigationItem.rightBarButtonItem = importBtn;
   [VMUIHelper addFixedFooterTo:self forTableView:self.tableView];
   [self loadData];
@@ -46,21 +49,14 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (void)checkInitialNavigation {
-  NSString *currentBid = [VMMemoryEngine shared].currentBundleID;
-  if (currentBid && currentBid.length > 0 && !self.isFolderMode) {
-    NSString *path = [[VMBackupManager shared].myBackupFolder
-        stringByAppendingPathComponent:currentBid];
-
-    BOOL isDir = NO;
-    if ([[NSFileManager defaultManager] fileExistsAtPath:path
-                                             isDirectory:&isDir] &&
-        isDir) {
-      self.viewingBundleID = currentBid;
-      [self enterFileMode];
-      return;
-    }
+  if (self.bid.length > 0) {
+    self.viewingBundleID = self.bid;
+    [self enterFileMode];
+  } else if (!self.isFolderMode && self.viewingBundleID.length > 0) {
+    [self enterFileMode];
+  } else {
+    [self enterFolderMode];
   }
-  [self enterFolderMode];
 }
 
 #pragma mark - Data Loading
@@ -75,6 +71,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 - (void)enterFolderMode {
   self.isFolderMode = YES;
   self.viewingBundleID = nil;
+  self.tableView.backgroundView = nil;
   self.title = TR(@"Backups_Global_Title");
   self.navigationItem.leftBarButtonItem = nil; // 恢复系统返回按钮
   self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
@@ -91,19 +88,12 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   if (!targetFolder || targetFolder.length == 0) {
     targetFolder = self.appName;
   }
-  self.title = targetFolder; // 显示当前 app 的 bundleID 作为标题
+  self.title = (self.bid.length > 0 && self.appName.length > 0) ? self.appName : targetFolder;
   NSArray *list = [[VMBackupManager shared] getBackupsForApp:targetFolder];
   self.backups = [list mutableCopy];
+  [self updateEmptyState];
   [self.tableView reloadData];
-  if (self.backups.count == 0) {
-    UILabel *lbl = [[UILabel alloc] initWithFrame:self.tableView.bounds];
-    lbl.text = TR(@"No_Backup_Found");
-    lbl.textAlignment = NSTextAlignmentCenter;
-    lbl.textColor = [UIColor systemGrayColor];
-    self.tableView.backgroundView = lbl;
-  } else {
-    self.tableView.backgroundView = nil;
-  }
+
   // 如果是从 folder 列表进入的（非直接 push 进来的单 app 模式），显示返回按钮
   if (self.bid && self.bid.length > 0) {
     // 单 app 模式，保留系统返回按钮
@@ -137,7 +127,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   NSArray *contents = [fm contentsOfDirectoryAtPath:root error:nil];
 
   if (!contents) {
-    [self.tableView reloadData];
+    [self updateEmptyState];
+  [self.tableView reloadData];
     return;
   }
 
@@ -159,21 +150,15 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
   [self.folderList
       sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+  [self updateEmptyState];
   [self.tableView reloadData];
 }
 
 - (void)loadFilesForBid:(NSString *)bid {
   self.backups = [[[VMBackupManager shared] getBackupsForApp:bid] mutableCopy];
+  [self updateEmptyState];
   [self.tableView reloadData];
-  if (self.backups.count == 0) {
-    UILabel *lbl = [[UILabel alloc] initWithFrame:self.tableView.bounds];
-    lbl.text = TR(@"No_Backup_Found");
-    lbl.textAlignment = NSTextAlignmentCenter;
-    lbl.textColor = [UIColor systemGrayColor];
-    self.tableView.backgroundView = lbl;
-  } else {
-    self.tableView.backgroundView = nil;
-  }
+
 }
 
 #pragma mark - Import Logic
@@ -323,6 +308,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                     reuseIdentifier:cid];
       cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+      cell.textLabel.font = [VMUIHelper scaledFontOfSize:16 weight:UIFontWeightSemibold];
+      cell.textLabel.adjustsFontForContentSizeCategory = YES;
+      cell.textLabel.numberOfLines = 0;
+      cell.detailTextLabel.numberOfLines = 0;
     }
     NSString *bid = self.folderList[indexPath.row];
     NSDictionary *meta = self.folderMetadata[bid];
@@ -341,6 +330,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                     reuseIdentifier:cid];
       cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+      cell.textLabel.font = [VMUIHelper scaledFontOfSize:16 weight:UIFontWeightSemibold];
+      cell.textLabel.adjustsFontForContentSizeCategory = YES;
+      cell.textLabel.numberOfLines = 0;
+      cell.detailTextLabel.numberOfLines = 0;
     }
     NSString *backupName = self.backups[indexPath.row];
     cell.textLabel.text = backupName;
@@ -500,7 +493,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                                  UITableViewRowAnimationFade];
 
                             if (self.folderList.count == 0) {
-                              [self.tableView reloadData];
+                              [self updateEmptyState];
+  [self.tableView reloadData];
                             }
 
                             completionHandler(YES);
@@ -610,6 +604,12 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       dispatch_get_main_queue(), ^{
         [alert dismissViewControllerAnimated:YES completion:nil];
       });
+}
+
+- (void)updateEmptyState {
+  NSUInteger count = self.isFolderMode ? self.folderList.count : self.backups.count;
+  self.tableView.tableFooterView.hidden = count == 0;
+  self.tableView.backgroundView = count == 0 ? [VMUIHelper emptyStateWithTitle:TR(@"Backups_Global_Title") message:TR(@"No_Backup_Found") symbol:@"archivebox"] : nil;
 }
 
 @end

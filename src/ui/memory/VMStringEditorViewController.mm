@@ -1,5 +1,6 @@
 #import "VMStringEditorViewController.h"
 #import "include/VMLocalization.h"
+#import "../../utils/helpers/VMUIHelper.h"
 #define STRING_TEXT(key) [[VMLocalization shared] localizedString:key]
 
 @interface VMStringEditorViewController () <UITextViewDelegate, UITableViewDataSource, UITableViewDelegate>
@@ -8,6 +9,8 @@
 @property(nonatomic, strong) UILabel *countLabel;
 @property(nonatomic, strong) UITableView *contextTable;
 @property(nonatomic, strong) UIStackView *headerStack;
+@property(nonatomic, strong) UIToolbar *editingTools;
+@property(nonatomic, strong) UIStackView *contextTools;
 @property(nonatomic, copy) NSArray<VMStringMemoryRecord *> *contextRecords;
 @property(nonatomic, strong) NSLayoutConstraint *textBottomConstraint;
 @property(nonatomic, strong) NSLayoutConstraint *headerTopConstraint;
@@ -25,13 +28,14 @@
 - (void)viewDidLoad {
   [super viewDidLoad];
   self.title = STRING_TEXT(@"Browser_Str_Edit");
-  self.view.backgroundColor = UIColor.systemBackgroundColor;
+  self.view.backgroundColor = [VMUIHelper canvasColor];
   self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
       initWithTitle:STRING_TEXT(@"Btn_Cancel") style:UIBarButtonItemStylePlain
       target:self action:@selector(cancelEditing)];
   self.saveButton = [[UIBarButtonItem alloc]
       initWithTitle:STRING_TEXT(@"Btn_Save") style:UIBarButtonItemStyleDone
       target:self action:@selector(confirmEditing)];
+  [VMUIHelper styleConfirmationItem:self.saveButton];
   self.undoButton = [[UIBarButtonItem alloc]
       initWithTitle:STRING_TEXT(@"Str_Undo_Button")
       style:UIBarButtonItemStylePlain target:self action:@selector(undoEditing)];
@@ -40,7 +44,7 @@
       initWithTitle:STRING_TEXT(@"Str_Reload_Button")
       style:UIBarButtonItemStylePlain target:self action:@selector(reloadSelection)];
   reload.accessibilityLabel = STRING_TEXT(@"Str_Reload");
-  self.navigationItem.rightBarButtonItems = @[self.saveButton, self.undoButton, reload];
+  self.navigationItem.rightBarButtonItem = self.saveButton;
 
   self.headerStack = [[UIStackView alloc] init];
   self.headerStack.axis = UILayoutConstraintAxisVertical;
@@ -54,8 +58,45 @@
   self.detailLabel.textColor = UIColor.secondaryLabelColor;
   self.detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [self.headerStack addArrangedSubview:self.detailLabel];
+  UIToolbar *editingTools = [UIToolbar new];
+  self.editingTools = editingTools;
+  editingTools.translucent = NO;
+  editingTools.barTintColor = [VMUIHelper cardColor];
+  editingTools.backgroundColor = [VMUIHelper cardColor];
+  editingTools.layer.cornerRadius = 12;
+  editingTools.layer.cornerCurve = kCACornerCurveContinuous;
+  editingTools.clipsToBounds = YES;
+  editingTools.tintColor = [VMUIHelper accentColor];
+  UIToolbarAppearance *editingAppearance = [UIToolbarAppearance new];
+  [editingAppearance configureWithOpaqueBackground];
+  editingAppearance.backgroundColor = [VMUIHelper cardColor];
+  editingAppearance.shadowColor = UIColor.clearColor;
+  editingAppearance.buttonAppearance.normal.titleTextAttributes = @{
+    NSForegroundColorAttributeName:[VMUIHelper accentColor]
+  };
+  editingAppearance.buttonAppearance.highlighted.titleTextAttributes =
+      editingAppearance.buttonAppearance.normal.titleTextAttributes;
+  editingAppearance.buttonAppearance.disabled.titleTextAttributes = @{
+    NSForegroundColorAttributeName:UIColor.secondaryLabelColor
+  };
+  editingTools.standardAppearance = editingAppearance;
+  editingTools.compactAppearance = editingAppearance;
+  if (@available(iOS 15.0, *)) {
+    editingTools.scrollEdgeAppearance = editingAppearance;
+    editingTools.compactScrollEdgeAppearance = editingAppearance;
+  }
+  for (UIBarButtonItem *item in @[reload, self.undoButton]) {
+    item.tintColor = [VMUIHelper accentColor];
+    if (@available(iOS 26.0, *)) item.hidesSharedBackground = YES;
+  }
+  editingTools.items = @[reload, [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil], self.undoButton];
+  NSLayoutConstraint *editingToolsHeight = [editingTools.heightAnchor constraintEqualToConstant:44];
+  editingToolsHeight.priority = UILayoutPriorityDefaultHigh;
+  editingToolsHeight.active = YES;
+  [self.headerStack addArrangedSubview:editingTools];
 
   UIStackView *tools = [[UIStackView alloc] init];
+  self.contextTools = tools;
   tools.axis = UILayoutConstraintAxisHorizontal;
   tools.distribution = UIStackViewDistributionFillEqually;
   tools.spacing = 8;
@@ -65,19 +106,24 @@
   for (NSUInteger i = 0; i < titles.count; i++) {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setTitle:titles[i] forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:13];
+    button.titleLabel.font = [VMUIHelper scaledFontOfSize:14 weight:UIFontWeightMedium];
+    [VMUIHelper styleButton:button primary:NO];
     [button addTarget:self action:NSSelectorFromString(selectors[i]) forControlEvents:UIControlEventTouchUpInside];
     [tools addArrangedSubview:button];
   }
   [self.headerStack addArrangedSubview:tools];
-  NSLayoutConstraint *toolsHeight = [tools.heightAnchor constraintEqualToConstant:36];
+  NSLayoutConstraint *toolsHeight = [tools.heightAnchor constraintEqualToConstant:44];
   toolsHeight.priority = UILayoutPriorityDefaultHigh;
   toolsHeight.active = YES;
 
   self.contextTable = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+  self.contextTable.showsHorizontalScrollIndicator = NO;
   self.contextTable.dataSource = self;
   self.contextTable.delegate = self;
-  self.contextTable.rowHeight = 56;
+  self.contextTable.rowHeight = 60;
+  self.contextTable.layer.cornerRadius = 16;
+  self.contextTable.layer.cornerCurve = kCACornerCurveContinuous;
+  self.contextTable.clipsToBounds = YES;
   self.contextTable.estimatedRowHeight = 0;
   self.contextTable.tableFooterView = [UIView new];
   self.contextTable.accessibilityLabel = STRING_TEXT(@"Str_Context");
@@ -86,15 +132,18 @@
 
   self.countLabel = [[UILabel alloc] init];
   self.countLabel.numberOfLines = 2;
-  self.countLabel.font = [UIFont systemFontOfSize:12];
+  self.countLabel.font = [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightMedium];
   self.countLabel.textColor = UIColor.secondaryLabelColor;
   self.countLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [self.headerStack addArrangedSubview:self.countLabel];
 
   self.textView = [[UITextView alloc] init];
+  self.textView.showsHorizontalScrollIndicator = NO;
   self.textView.delegate = self;
   self.textView.font = [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular];
-  self.textView.backgroundColor = UIColor.secondarySystemBackgroundColor;
+  self.textView.backgroundColor = [VMUIHelper cardColor];
+  self.textView.layer.cornerRadius = 16;
+  self.textView.layer.cornerCurve = kCACornerCurveContinuous;
   self.textView.textColor = UIColor.labelColor;
   self.textView.textContainerInset = UIEdgeInsetsMake(12, 8, 12, 8);
   self.textView.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -113,26 +162,27 @@
       initWithTitle:STRING_TEXT(@"Btn_Hide_Keyboard") style:UIBarButtonItemStyleDone
       target:self action:@selector(hideKeyboard)];
   keyboardToolbar.items = @[flexibleSpace, hideKeyboard];
+  [VMUIHelper styleConfirmationItem:keyboardToolbar.items.lastObject];
   self.textView.inputAccessoryView = keyboardToolbar;
   self.textView.accessibilityLabel = self.title;
   self.textView.translatesAutoresizingMaskIntoConstraints = NO;
   [self.view addSubview:self.textView];
 
   UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
-  self.textBottomConstraint = [self.textView.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-12];
+  self.textBottomConstraint = [self.textView.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-16];
   self.headerTopConstraint = [self.headerStack.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8];
   self.textTopConstraint = [self.textView.topAnchor constraintEqualToAnchor:self.headerStack.bottomAnchor constant:4];
   self.contextHeightConstraint = [self.contextTable.heightAnchor constraintEqualToConstant:168];
   self.contextHeightConstraint.priority = UILayoutPriorityDefaultHigh;
   [NSLayoutConstraint activateConstraints:@[
     self.headerTopConstraint,
-    [self.headerStack.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12],
-    [self.headerStack.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
+    [self.headerStack.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
+    [self.headerStack.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
     self.contextHeightConstraint,
     [self.contextTable.heightAnchor constraintGreaterThanOrEqualToConstant:0],
     self.textTopConstraint,
-    [self.textView.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12],
-    [self.textView.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
+    [self.textView.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
+    [self.textView.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
     [self.textView.heightAnchor constraintGreaterThanOrEqualToConstant:0],
     self.textBottomConstraint
   ]];
@@ -193,6 +243,8 @@
       s.terminated ? @"Str_Shorter_Allowed" : @"Str_Equal_Length");
   self.countLabel.text = [NSString stringWithFormat:STRING_TEXT(@"Str_Count_Fmt"),
       (unsigned long)s.byteLimit, (unsigned long)bytes.length, rule];
+  if (!valid && error.length) self.countLabel.text = [self.countLabel.text stringByAppendingFormat:@"\n%@", STRING_TEXT(error)];
+  self.countLabel.numberOfLines = 0;
   self.countLabel.textColor = valid ? UIColor.secondaryLabelColor : UIColor.systemRedColor;
   self.saveButton.enabled = valid;
   self.undoButton.enabled = s.canUndo;
@@ -203,6 +255,7 @@
 - (void)reloadContext {
   self.contextRecords = self.session.records;
   [self.contextTable reloadData];
+  [self.view setNeedsLayout];
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -221,7 +274,8 @@
   cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
   BOOL selected = self.session.address >= record.address &&
       self.session.address - record.address < record.bytes.length;
-  cell.backgroundColor = selected ? [UIColor.systemOrangeColor colorWithAlphaComponent:0.12] : UIColor.systemBackgroundColor;
+  cell.backgroundColor = selected ? [[VMUIHelper accentColor] colorWithAlphaComponent:0.1] : [VMUIHelper cardColor];
+  cell.accessibilityTraits = UIAccessibilityTraitButton | (selected ? UIAccessibilityTraitSelected : 0);
   cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
   return cell;
 }
@@ -241,7 +295,7 @@
 - (void)loadContextBefore:(BOOL)before {
   NSIndexPath *first = self.contextTable.indexPathsForVisibleRows.firstObject;
   VMStringMemoryRecord *anchor = first && first.row < self.contextRecords.count ? self.contextRecords[first.row] : nil;
-  CGFloat offset = first ? self.contextTable.contentOffset.y - first.row * 56 : 0;
+  CGFloat offset = first ? self.contextTable.contentOffset.y - first.row * 60 : 0;
   NSString *error = nil;
   if (![self.session loadMoreBefore:before error:&error]) { [self showMessage:error]; return; }
   [self reloadContext];
@@ -251,7 +305,7 @@
       VMStringMemoryRecord *record = self.contextRecords[i];
       if (anchor.address >= record.address && anchor.address - record.address < record.bytes.length) {
         CGFloat maxY = MAX(0, self.contextTable.contentSize.height - self.contextTable.bounds.size.height);
-        self.contextTable.contentOffset = CGPointMake(0, MIN(maxY, MAX(0, i * 56 + offset)));
+        self.contextTable.contentOffset = CGPointMake(0, MIN(maxY, MAX(0, i * 60 + offset)));
         break;
       }
     }
@@ -423,8 +477,16 @@
   UIEdgeInsets textInsets = UIEdgeInsetsMake(compact ? 4 : 12, 8, compact ? 4 : 12, 8);
   if (!UIEdgeInsetsEqualToEdgeInsets(self.textView.textContainerInset, textInsets))
     self.textView.textContainerInset = textInsets;
-  for (UIView *view in self.headerStack.arrangedSubviews) view.hidden = compact;
-  self.contextHeightConstraint.constant = compact ? 0 : MIN(168, MAX(56, available - 180));
+  // Keep typing space available as soon as the keyboard appears. Context
+  // browsing can resume after dismissing it, while validation and Undo stay visible.
+  BOOL keyboardVisible = inset > 0;
+  self.detailLabel.hidden = compact || keyboardVisible;
+  self.editingTools.hidden = compact;
+  self.contextTools.hidden = compact || keyboardVisible;
+  self.contextTable.hidden = compact || keyboardVisible || self.contextRecords.count == 0;
+  self.countLabel.hidden = compact;
+  CGFloat rowsHeight = self.contextRecords.count * self.contextTable.rowHeight;
+  self.contextHeightConstraint.constant = self.contextTable.hidden ? 0 : MIN(rowsHeight, MIN(168, MAX(60, available - 320)));
 }
 
 - (void)keyboardChanged:(NSNotification *)notification {

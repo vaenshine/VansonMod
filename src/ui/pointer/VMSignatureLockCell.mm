@@ -1,3 +1,4 @@
+#import "../../utils/helpers/VMUIHelper.h"
 #import "VMSignatureLockCell.h"
 #import "include/VMLocalization.h"
 #import "include/VMSignatureModel.h" // 使用新模型
@@ -8,6 +9,7 @@
 
 @interface VMSignatureLockCell ()
 @property(nonatomic, strong) UIView *cardContainer;
+@property(nonatomic, strong) UIColor *cardBorderColor;
 @property(nonatomic, strong) UIView *statusIndicator;
 @property(nonatomic, strong) UILabel *titleLabel;
 @property(nonatomic, strong) UILabel *authorLabel;
@@ -38,11 +40,23 @@
                                 : UITableViewCellSelectionStyleNone;
 }
 
+- (void)setCardBorderColor:(UIColor *)color {
+  _cardBorderColor = color;
+  self.cardContainer.layer.borderColor = [color resolvedColorWithTraitCollection:self.traitCollection].CGColor;
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
+  if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+    self.cardBorderColor = self.cardBorderColor ?: UIColor.clearColor;
+  }
+}
+
 - (void)setupUI {
   _cardContainer = [[UIView alloc] init];
   _cardContainer.backgroundColor =
       [UIColor secondarySystemGroupedBackgroundColor];
-  _cardContainer.layer.cornerRadius = kCardCornerRadius;
+  [VMUIHelper styleCard:_cardContainer];
   _cardContainer.translatesAutoresizingMaskIntoConstraints = NO;
   [self.contentView addSubview:_cardContainer];
 
@@ -54,7 +68,7 @@
   _authorLabel = [self createLabelFont:13
                                 weight:UIFontWeightMedium
                                  color:[UIColor secondaryLabelColor]];
-  _authorLabel.textAlignment = NSTextAlignmentRight;
+  _authorLabel.textAlignment = NSTextAlignmentNatural;
   [_cardContainer addSubview:_authorLabel];
 
   _statusIndicator = [[UIView alloc] init];
@@ -71,8 +85,9 @@
   _sigCodeLabel = [self createLabelFont:11
                                  weight:UIFontWeightRegular
                                   color:[UIColor systemIndigoColor]];
-  _sigCodeLabel.font = [UIFont fontWithName:@"Menlo" size:11];
+  _sigCodeLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleFootnote] scaledFontForFont:[UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular]];
   _sigCodeLabel.numberOfLines = 0;
+  _sigCodeLabel.adjustsFontForContentSizeCategory = YES;
   [_cardContainer addSubview:_sigCodeLabel];
 
   _separatorLine = [[UIView alloc] init];
@@ -101,7 +116,7 @@
       forControlEvents:UIControlEventTouchUpInside];
 
   _btnScan = [self createButton:TR(@"Sig_Btn_Verify")
-                          color:[UIColor systemBlueColor]];
+                          color:[VMUIHelper accentColor]];
   [_btnScan addTarget:self
                 action:@selector(onScanTap)
       forControlEvents:UIControlEventTouchUpInside];
@@ -118,7 +133,7 @@
   [btnStack addArrangedSubview:_btnEdit];
   [btnStack addArrangedSubview:_btnScan];
 
-  CGFloat p = 14.0;
+  CGFloat p = 16.0;
   [NSLayoutConstraint activateConstraints:@[
     [_cardContainer.topAnchor constraintEqualToAnchor:self.contentView.topAnchor
                                              constant:6],
@@ -127,10 +142,10 @@
                        constant:-6],
     [_cardContainer.leadingAnchor
         constraintEqualToAnchor:self.contentView.leadingAnchor
-                       constant:12],
+                       constant:0],
     [_cardContainer.trailingAnchor
         constraintEqualToAnchor:self.contentView.trailingAnchor
-                       constant:-12],
+                       constant:0],
 
     [_titleLabel.topAnchor constraintEqualToAnchor:_cardContainer.topAnchor
                                           constant:p],
@@ -138,11 +153,11 @@
         constraintEqualToAnchor:_cardContainer.leadingAnchor
                        constant:p],
     [_titleLabel.trailingAnchor
-        constraintLessThanOrEqualToAnchor:_authorLabel.leadingAnchor
+        constraintLessThanOrEqualToAnchor:_statusIndicator.leadingAnchor
                                  constant:-8],
 
-    [_authorLabel.centerYAnchor
-        constraintEqualToAnchor:_titleLabel.centerYAnchor],
+    [_authorLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:4],
+    [_authorLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
     [_authorLabel.trailingAnchor
         constraintEqualToAnchor:_statusIndicator.leadingAnchor
                        constant:-8],
@@ -155,7 +170,7 @@
     [_statusIndicator.widthAnchor constraintEqualToConstant:8],
     [_statusIndicator.heightAnchor constraintEqualToConstant:8],
 
-    [_moduleLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor
+    [_moduleLabel.topAnchor constraintEqualToAnchor:_authorLabel.bottomAnchor
                                            constant:4],
     [_moduleLabel.leadingAnchor
         constraintEqualToAnchor:_cardContainer.leadingAnchor
@@ -197,7 +212,7 @@
     [btnStack.trailingAnchor
         constraintEqualToAnchor:_cardContainer.trailingAnchor
                        constant:-p],
-    [btnStack.heightAnchor constraintEqualToConstant:34],
+    [btnStack.heightAnchor constraintGreaterThanOrEqualToConstant:44],
     [btnStack.bottomAnchor constraintEqualToAnchor:_cardContainer.bottomAnchor
                                           constant:-p]
   ]];
@@ -231,7 +246,7 @@
         [NSString stringWithFormat:@"%@", sig.note ?: TR(@"Sig_Default_Title")];
 
     _cardContainer.layer.borderWidth = 1.0;
-    _cardContainer.layer.borderColor = [UIColor systemGray4Color].CGColor;
+    self.cardBorderColor = UIColor.systemGray4Color;
   } else {
     
     _cardContainer.layer.borderWidth = 0;
@@ -243,11 +258,11 @@
   if (sig.isScanning) {
     [_spinner startAnimating];
     [_btnScan setTitle:@"" forState:UIControlStateNormal];
-    _statusIndicator.backgroundColor = [UIColor systemBlueColor];
+    _statusIndicator.backgroundColor = [VMUIHelper accentColor];
 
     UILabel *loading = [self createLabelFont:12
                                       weight:UIFontWeightMedium
-                                       color:[UIColor systemBlueColor]];
+                                       color:[VMUIHelper accentColor]];
     loading.text = TR(@"Sig_Status_Scanning");
     loading.textAlignment = NSTextAlignmentCenter;
     [_resultsStack addArrangedSubview:loading];
@@ -327,156 +342,98 @@
                               index:(NSInteger)idx
                              config:(NSDictionary *)config
                         maskAddress:(BOOL)maskAddr {
-  UIView *row = [[UIView alloc] init];
+  UIView *row = [UIView new];
   row.backgroundColor = [UIColor tertiarySystemGroupedBackgroundColor];
-  row.layer.cornerRadius = 6;
-  row.userInteractionEnabled = YES;
+  row.layer.cornerRadius = 12;
+  row.layer.cornerCurve = kCACornerCurveContinuous;
   row.tag = idx;
-  
   BOOL isSlider = [config[@"type"] isEqualToString:@"slider"];
   BOOL isSwitch = [config[@"type"] isEqualToString:@"switch"];
-  
-  [row.heightAnchor constraintEqualToConstant:(isSlider || isSwitch) ? 72 : 40].active = YES;
-
-  if (isSwitch) {
-    
-    UIStackView *leftStack = [[UIStackView alloc] init];
-    leftStack.axis = UILayoutConstraintAxisVertical;
-    leftStack.spacing = 6;
-    leftStack.alignment = UIStackViewAlignmentCenter;
-    leftStack.translatesAutoresizingMaskIntoConstraints = NO;
-    
-    UIStackView *addrValRow = [[UIStackView alloc] init];
-    addrValRow.axis = UILayoutConstraintAxisHorizontal;
-    addrValRow.spacing = 8;
-    addrValRow.alignment = UIStackViewAlignmentCenter;
-    
-    UILabel *lblAddr = [self createLabelFont:11 weight:UIFontWeightRegular color:[UIColor secondaryLabelColor]];
-    lblAddr.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
-    lblAddr.text = maskAddr ? @"0x********" : [NSString stringWithFormat:@"0x%llX", addr];
-    [addrValRow addArrangedSubview:lblAddr];
-    
-    UIButton *valBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [valBtn setTitle:val forState:UIControlStateNormal];
-    valBtn.titleLabel.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightBold];
-    [valBtn setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
-    valBtn.tag = idx;
-    [valBtn addTarget:self action:@selector(onValueTap:) forControlEvents:UIControlEventTouchUpInside];
-    objc_setAssociatedObject(valBtn, "addr", @(addr), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [addrValRow addArrangedSubview:valBtn];
-    
-    [leftStack addArrangedSubview:addrValRow];
-    
-    UISwitch *resultSwitch = [[UISwitch alloc] init];
-    resultSwitch.tag = idx;
-    NSString *switchOnValue = config[@"switchOnValue"] ?: @"1";
-    BOOL isOn = [val isEqualToString:switchOnValue];
-    [resultSwitch setOn:isOn animated:NO];
-    [resultSwitch addTarget:self action:@selector(onResultSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-    objc_setAssociatedObject(resultSwitch, "addr", @(addr), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [leftStack addArrangedSubview:resultSwitch];
-    
-    UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[TR(@"Mode_Switch_Card"), TR(@"Mode_Switch_Slider"), TR(@"Mode_Switch_Toggle")]];
-    seg.selectedSegmentIndex = 2;
-    seg.tag = idx;
-    [seg addTarget:self action:@selector(onModeSegmentChanged:) forControlEvents:UIControlEventValueChanged];
-    seg.transform = CGAffineTransformMakeScale(0.8, 0.8);
-    seg.translatesAutoresizingMaskIntoConstraints = NO;
-    
-    [row addSubview:leftStack];
-    [row addSubview:seg];
-    
-    [NSLayoutConstraint activateConstraints:@[
-      [leftStack.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:8],
-      [leftStack.topAnchor constraintEqualToAnchor:row.topAnchor constant:6],
-      [leftStack.bottomAnchor constraintEqualToAnchor:row.bottomAnchor constant:-6],
-      [seg.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-4],
-      [seg.centerYAnchor constraintEqualToAnchor:row.centerYAnchor]
-    ]];
-    
-    return row;
-  }
-
-  UIStackView *contentStack = [[UIStackView alloc] init];
-  contentStack.axis = UILayoutConstraintAxisVertical;
-  contentStack.spacing = 6;
-  contentStack.alignment = UIStackViewAlignmentFill;
-  contentStack.translatesAutoresizingMaskIntoConstraints = NO;
-  [row addSubview:contentStack];
-
-  UIStackView *topRow = [[UIStackView alloc] init];
-  topRow.axis = UILayoutConstraintAxisHorizontal;
-  topRow.spacing = 8;
-  topRow.alignment = UIStackViewAlignmentCenter;
-
-  UILabel *lblAddr = [self createLabelFont:11 weight:UIFontWeightRegular color:[UIColor secondaryLabelColor]];
-  lblAddr.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
-  lblAddr.text = maskAddr ? @"0x********" : [NSString stringWithFormat:@"0x%llX", addr];
-  [topRow addArrangedSubview:lblAddr];
-
-  UIButton *valBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-  [valBtn setTitle:val forState:UIControlStateNormal];
-  valBtn.titleLabel.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightBold];
-  [valBtn setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
-  valBtn.tag = idx;
-  valBtn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-  [valBtn addTarget:self action:@selector(onValueTap:) forControlEvents:UIControlEventTouchUpInside];
-  objc_setAssociatedObject(valBtn, "addr", @(addr), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-  [topRow addArrangedSubview:valBtn];
-
-  UIView *spacer = [UIView new];
-  [topRow addArrangedSubview:spacer];
-
-  UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[TR(@"Mode_Switch_Card"), TR(@"Mode_Switch_Slider"), TR(@"Mode_Switch_Toggle")]];
-  NSInteger segIdx = 0;
-  if (isSlider) segIdx = 1;
-  seg.selectedSegmentIndex = segIdx;
-  seg.tag = idx;
-  [seg addTarget:self action:@selector(onModeSegmentChanged:) forControlEvents:UIControlEventValueChanged];
-  [seg setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-  seg.transform = CGAffineTransformMakeScale(0.8, 0.8);
-  [topRow addArrangedSubview:seg];
-
-  [contentStack addArrangedSubview:topRow];
-
+  UIStackView *content = [UIStackView new];
+  content.axis = UILayoutConstraintAxisVertical;
+  content.spacing = 10;
+  content.translatesAutoresizingMaskIntoConstraints = NO;
+  [row addSubview:content];
+  UIStackView *top = [UIStackView new];
+  top.axis = UILayoutConstraintAxisHorizontal;
+  top.spacing = 8;
+  top.alignment = UIStackViewAlignmentCenter;
+  UILabel *address = [self createLabelFont:12 weight:UIFontWeightRegular color:[UIColor secondaryLabelColor]];
+  address.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+  address.text = maskAddr ? @"0x********" : [NSString stringWithFormat:@"0x%llX", addr];
+  address.numberOfLines = 0;
+  address.lineBreakMode = NSLineBreakByCharWrapping;
+  [top addArrangedSubview:address];
+  UIButton *value = [UIButton buttonWithType:UIButtonTypeSystem];
+  [value setTitle:val forState:UIControlStateNormal];
+  value.tintColor = [VMUIHelper accentColor];
+  [VMUIHelper styleButton:value primary:NO];
+  value.accessibilityLabel = [NSString stringWithFormat:@"%@ · %@", note.length ? note : TR(@"Lock_Label_Value"), address.text];
+  value.accessibilityValue = val;
+  value.tag = idx;
+  [value.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [value addTarget:self action:@selector(onValueTap:) forControlEvents:UIControlEventTouchUpInside];
+  objc_setAssociatedObject(value, "addr", @(addr), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  [top addArrangedSubview:value];
+  [content addArrangedSubview:top];
+  UISegmentedControl *mode = [[UISegmentedControl alloc] initWithItems:@[TR(@"Mode_Switch_Card"), TR(@"Mode_Switch_Slider"), TR(@"Mode_Switch_Toggle")]];
+  mode.selectedSegmentIndex = isSlider ? 1 : isSwitch ? 2 : 0;
+  mode.accessibilityLabel = TR(@"Display_Mode");
+  mode.tag = idx;
+  [mode.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [mode addTarget:self action:@selector(onModeSegmentChanged:) forControlEvents:UIControlEventValueChanged];
+  [content addArrangedSubview:mode];
   if (isSlider) {
-    UIStackView *sliderRow = [[UIStackView alloc] init];
+    float minimum = [config[@"min"] floatValue];
+    float maximum = [config[@"max"] floatValue];
+    if (minimum >= maximum) { minimum = 0; maximum = 100; }
+    UIStackView *sliderRow = [UIStackView new];
     sliderRow.axis = UILayoutConstraintAxisHorizontal;
-    sliderRow.spacing = 6;
+    sliderRow.spacing = 8;
     sliderRow.alignment = UIStackViewAlignmentCenter;
-
-    float minVal = [config[@"min"] floatValue];
-    float maxVal = [config[@"max"] floatValue];
-    if (minVal == 0 && maxVal == 0) { minVal = 0; maxVal = 100; }
-
-    UILabel *minLabel = [self createLabelFont:9 weight:UIFontWeightRegular color:[UIColor tertiaryLabelColor]];
-    minLabel.text = [NSString stringWithFormat:@"%.0f", minVal];
-    [sliderRow addArrangedSubview:minLabel];
-
-    UISlider *slider = [[UISlider alloc] init];
-    slider.minimumValue = minVal;
-    slider.maximumValue = maxVal;
-    slider.value = [val floatValue];
+    UILabel *min = [self createLabelFont:12 weight:UIFontWeightRegular color:[UIColor secondaryLabelColor]];
+    min.text = [NSString stringWithFormat:@"%g", minimum];
+    UILabel *max = [self createLabelFont:12 weight:UIFontWeightRegular color:[UIColor secondaryLabelColor]];
+    max.text = [NSString stringWithFormat:@"%g", maximum];
+    UISlider *slider = [UISlider new];
+    slider.minimumValue = minimum;
+    slider.maximumValue = maximum;
+    slider.value = val.floatValue;
     slider.tag = idx;
+    slider.accessibilityLabel = value.accessibilityLabel;
+    slider.accessibilityValue = val;
+    [slider.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
     [slider addTarget:self action:@selector(onResultSliderChanged:) forControlEvents:UIControlEventValueChanged];
     [slider addTarget:self action:@selector(onResultSliderTouchUp:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside];
+    [sliderRow addArrangedSubview:min];
     [sliderRow addArrangedSubview:slider];
-
-    UILabel *maxLabel = [self createLabelFont:9 weight:UIFontWeightRegular color:[UIColor tertiaryLabelColor]];
-    maxLabel.text = [NSString stringWithFormat:@"%.0f", maxVal];
-    [sliderRow addArrangedSubview:maxLabel];
-
-    [contentStack addArrangedSubview:sliderRow];
+    [sliderRow addArrangedSubview:max];
+    [content addArrangedSubview:sliderRow];
+  } else if (isSwitch) {
+    UIStackView *switchRow = [UIStackView new];
+    switchRow.axis = UILayoutConstraintAxisHorizontal;
+    switchRow.alignment = UIStackViewAlignmentCenter;
+    switchRow.spacing = 8;
+    UILabel *title = [self createLabelFont:13 weight:UIFontWeightRegular color:[UIColor secondaryLabelColor]];
+    title.text = note.length ? note : TR(@"Mode_Switch_Toggle");
+    UISwitch *toggle = [UISwitch new];
+    toggle.onTintColor = [VMUIHelper accentColor];
+    toggle.tag = idx;
+    toggle.on = [val isEqualToString:config[@"switchOnValue"] ?: @"1"];
+    toggle.accessibilityLabel = value.accessibilityLabel;
+    [toggle addTarget:self action:@selector(onResultSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+    objc_setAssociatedObject(toggle, "addr", @(addr), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [switchRow addArrangedSubview:title];
+    [switchRow addArrangedSubview:toggle];
+    [switchRow.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+    [content addArrangedSubview:switchRow];
   }
-
   [NSLayoutConstraint activateConstraints:@[
-    [contentStack.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:8],
-    [contentStack.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-8],
-    [contentStack.topAnchor constraintEqualToAnchor:row.topAnchor constant:6],
-    [contentStack.bottomAnchor constraintEqualToAnchor:row.bottomAnchor constant:-6],
-    [spacer.widthAnchor constraintGreaterThanOrEqualToConstant:4]
+    [content.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:12],
+    [content.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-12],
+    [content.topAnchor constraintEqualToAnchor:row.topAnchor constant:12],
+    [content.bottomAnchor constraintEqualToAnchor:row.bottomAnchor constant:-12]
   ]];
-
   return row;
 }
 
@@ -594,20 +551,20 @@
                       weight:(UIFontWeight)weight
                        color:(UIColor *)color {
   UILabel *l = [UILabel new];
-  l.font = [UIFont systemFontOfSize:size weight:weight];
+  l.font = [VMUIHelper scaledFontOfSize:MAX(12, size) weight:weight];
+  l.adjustsFontForContentSizeCategory = YES;
+  l.numberOfLines = 0;
   l.textColor = color;
   l.translatesAutoresizingMaskIntoConstraints = NO;
   return l;
 }
 
 - (UIButton *)createButton:(NSString *)title color:(UIColor *)color {
-  UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-  btn.backgroundColor = [color colorWithAlphaComponent:0.1];
-  [btn setTitle:title forState:UIControlStateNormal];
-  [btn setTitleColor:color forState:UIControlStateNormal];
-  btn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-  btn.layer.cornerRadius = 6;
-  return btn;
+  UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+  [button setTitle:title forState:UIControlStateNormal];
+  button.tintColor = [VMUIHelper accentColor];
+  [VMUIHelper styleButton:button primary:NO];
+  return button;
 }
 
 #pragma mark - Actions

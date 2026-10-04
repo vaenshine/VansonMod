@@ -1,11 +1,13 @@
+#import "../../utils/helpers/VMUIHelper.h"
 #import "../patch/VMRVAManagerCell.h"
 #import "include/VMLocalization.h"
 #import "include/VMRVAPatch.h"
 #define kCardCornerRadius 16.0
-#define kButtonHeight 34.0
+#define kButtonHeight 44.0
 #define TR(key) ([[VMLocalization shared] localizedString:key])
 @interface VMRVAManagerCell ()
 @property(nonatomic, strong) UIView *cardContainer;
+@property(nonatomic, strong) UIColor *cardBorderColor;
 @property(nonatomic, strong) UIView *statusIndicator;
 @property(nonatomic, strong) UILabel *titleLabel;
 @property(nonatomic, strong) UILabel *authorLabel;
@@ -39,27 +41,43 @@
                                 : UITableViewCellSelectionStyleNone;
 }
 
+- (void)setCardBorderColor:(UIColor *)color {
+  _cardBorderColor = color;
+  self.cardContainer.layer.borderColor = [color resolvedColorWithTraitCollection:self.traitCollection].CGColor;
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
+  if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+    self.cardBorderColor = self.cardBorderColor ?: UIColor.clearColor;
+  }
+}
+
 - (void)setupUI {
   _cardContainer = [[UIView alloc] init];
   _cardContainer.backgroundColor =
       [UIColor secondarySystemGroupedBackgroundColor];
-  _cardContainer.layer.cornerRadius = kCardCornerRadius;
+  [VMUIHelper styleCard:_cardContainer];
   _cardContainer.layer.borderWidth = 1.0;
-  _cardContainer.layer.borderColor = [UIColor clearColor].CGColor;
+  self.cardBorderColor = UIColor.clearColor;
   _cardContainer.translatesAutoresizingMaskIntoConstraints = NO;
   [self.contentView addSubview:_cardContainer];
 
   _titleLabel = [[UILabel alloc] init];
-  _titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+  _titleLabel.font = [VMUIHelper scaledFontOfSize:17 weight:UIFontWeightSemibold];
+  _titleLabel.adjustsFontForContentSizeCategory = YES;
+  _titleLabel.numberOfLines = 0;
   _titleLabel.textColor = [UIColor labelColor];
   _titleLabel.numberOfLines = 0;
   _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [_cardContainer addSubview:_titleLabel];
 
   _authorLabel = [[UILabel alloc] init];
-  _authorLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+  _authorLabel.font = [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightRegular];
+  _authorLabel.adjustsFontForContentSizeCategory = YES;
+  _authorLabel.numberOfLines = 0;
   _authorLabel.textColor = [UIColor secondaryLabelColor];
-  _authorLabel.textAlignment = NSTextAlignmentRight;
+  _authorLabel.textAlignment = NSTextAlignmentNatural;
   _authorLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [_authorLabel
       setContentCompressionResistancePriority:UILayoutPriorityRequired
@@ -73,16 +91,17 @@
   [_cardContainer addSubview:_statusIndicator];
 
   _metaLabel = [[UILabel alloc] init];
-  _metaLabel.font = [UIFont fontWithName:@"Menlo" size:11];
+  _metaLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleFootnote] scaledFontForFont:[UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular]];
   _metaLabel.textColor = [UIColor secondaryLabelColor];
   _metaLabel.numberOfLines = 0;
+  _metaLabel.adjustsFontForContentSizeCategory = YES;
   _metaLabel.lineBreakMode = NSLineBreakByCharWrapping;
   _metaLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [_cardContainer addSubview:_metaLabel];
 
   _appInfoLabel = [[UILabel alloc] init];
   _appInfoLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-  _appInfoLabel.textColor = [UIColor tertiaryLabelColor];
+  _appInfoLabel.textColor = [UIColor secondaryLabelColor];
   _appInfoLabel.numberOfLines = 0;
   _appInfoLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [_cardContainer addSubview:_appInfoLabel];
@@ -128,7 +147,7 @@
       forControlEvents:UIControlEventTouchUpInside];
 
   _btnToggle = [self createButton:TR(@"Btn_Inject")
-                            color:[UIColor systemBlueColor]
+                            color:[VMUIHelper accentColor]
                            filled:YES];
   [_btnToggle addTarget:self
                  action:@selector(onToggleTap)
@@ -137,7 +156,7 @@
   [btnStack addArrangedSubview:_btnEdit];
   [btnStack addArrangedSubview:_btnToggle];
 
-  CGFloat p = 14.0;
+  CGFloat p = 16.0;
 
   [NSLayoutConstraint activateConstraints:@[
     [_cardContainer.topAnchor constraintEqualToAnchor:self.contentView.topAnchor
@@ -147,10 +166,10 @@
                        constant:-6],
     [_cardContainer.leadingAnchor
         constraintEqualToAnchor:self.contentView.leadingAnchor
-                       constant:12],
+                       constant:0],
     [_cardContainer.trailingAnchor
         constraintEqualToAnchor:self.contentView.trailingAnchor
-                       constant:-12],
+                       constant:0],
 
     [_titleLabel.topAnchor constraintEqualToAnchor:_cardContainer.topAnchor
                                           constant:p],
@@ -158,11 +177,11 @@
         constraintEqualToAnchor:_cardContainer.leadingAnchor
                        constant:p],
     [_titleLabel.trailingAnchor
-        constraintLessThanOrEqualToAnchor:_authorLabel.leadingAnchor
+        constraintLessThanOrEqualToAnchor:_statusIndicator.leadingAnchor
                                  constant:-8],
 
-    [_authorLabel.centerYAnchor
-        constraintEqualToAnchor:_titleLabel.firstBaselineAnchor],
+    [_authorLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:4],
+    [_authorLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
     [_authorLabel.trailingAnchor
         constraintEqualToAnchor:_statusIndicator.leadingAnchor
                        constant:-8],
@@ -175,7 +194,7 @@
     [_statusIndicator.widthAnchor constraintEqualToConstant:8],
     [_statusIndicator.heightAnchor constraintEqualToConstant:8],
 
-    [_metaLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor
+    [_metaLabel.topAnchor constraintEqualToAnchor:_authorLabel.bottomAnchor
                                          constant:4],
     [_metaLabel.leadingAnchor
         constraintEqualToAnchor:_cardContainer.leadingAnchor
@@ -238,38 +257,18 @@
     [btnStack.trailingAnchor
         constraintEqualToAnchor:_cardContainer.trailingAnchor
                        constant:-p],
-    [btnStack.heightAnchor constraintEqualToConstant:kButtonHeight],
+    [btnStack.heightAnchor constraintGreaterThanOrEqualToConstant:kButtonHeight],
     [btnStack.bottomAnchor constraintEqualToAnchor:_cardContainer.bottomAnchor
                                           constant:-p]
   ]];
 }
 
-- (UIButton *)createButton:(NSString *)title
-                     color:(UIColor *)color
-                    filled:(BOOL)filled {
-  UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-  if (@available(iOS 15.0, *)) {
-    UIButtonConfiguration *conf =
-        filled ? [UIButtonConfiguration filledButtonConfiguration]
-               : [UIButtonConfiguration grayButtonConfiguration];
-    conf.baseBackgroundColor = filled ? color : [UIColor systemGray6Color];
-    conf.baseForegroundColor =
-        filled ? [UIColor whiteColor] : [UIColor labelColor];
-    conf.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    NSDictionary *attrs = @{
-      NSFontAttributeName : [UIFont systemFontOfSize:13 weight:UIFontWeightBold]
-    };
-    conf.attributedTitle = [[NSAttributedString alloc] initWithString:title
-                                                           attributes:attrs];
-    btn.configuration = conf;
-  } else {
-    [btn setTitle:title forState:UIControlStateNormal];
-    btn.backgroundColor = filled ? color : [UIColor systemGray6Color];
-    btn.tintColor = filled ? [UIColor whiteColor] : [UIColor labelColor];
-    btn.layer.cornerRadius = 8;
-    btn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-  }
-  return btn;
+- (UIButton *)createButton:(NSString *)title color:(UIColor *)color filled:(BOOL)filled {
+  UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+  button.tintColor = filled ? [VMUIHelper accentColor] : [UIColor secondaryLabelColor];
+  [button setTitle:title forState:UIControlStateNormal];
+  [VMUIHelper styleButton:button primary:filled];
+  return button;
 }
 
 - (UILabel *)createTagLabel:(NSString *)text color:(UIColor *)color {
@@ -288,8 +287,7 @@
   l.textAlignment = NSTextAlignmentLeft;
   l.numberOfLines = 0;
   l.lineBreakMode = NSLineBreakByCharWrapping;
-  l.adjustsFontSizeToFitWidth = YES;
-  l.minimumScaleFactor = 0.7;
+  l.adjustsFontForContentSizeCategory = YES;
   l.translatesAutoresizingMaskIntoConstraints = NO;
   return l;
 }
@@ -340,7 +338,7 @@
   if (patch.isImported) {
     
     _cardContainer.layer.borderWidth = 1.0;
-    _cardContainer.layer.borderColor = [UIColor systemGray4Color].CGColor;
+    self.cardBorderColor = UIColor.systemGray4Color;
   } else {
     
     _cardContainer.layer.borderWidth = 0;
@@ -357,32 +355,32 @@
 
   void (^updates)(void) = ^{
     if (isActive) {
-      UIColor *activeColor = [UIColor systemRedColor];
+      UIColor *activeColor = [VMUIHelper accentColor];
 
-      self.cardContainer.layer.borderColor = activeColor.CGColor;
+      self.cardBorderColor = activeColor;
       self.cardContainer.backgroundColor =
-          [activeColor colorWithAlphaComponent:0.08];
+          [VMUIHelper cardColor];
       self.statusIndicator.backgroundColor = activeColor;
 
-      self.hexDisplayLabel.textColor = [UIColor systemRedColor];
+      self.hexDisplayLabel.textColor = [VMUIHelper accentColor];
       self.hexDisplayLabel.font =
           [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightBold];
 
-      self.origHexLabel.textColor = [UIColor tertiaryLabelColor];
+      self.origHexLabel.textColor = [UIColor secondaryLabelColor];
       self.origHexLabel.font =
           [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
 
       [self updateButton:_btnToggle
                    title:TR(@"Btn_Restore")
-                   color:[UIColor systemGreenColor]
+                   color:[VMUIHelper accentColor]
                   filled:YES];
 
     } else {
       UIColor *restoreColor = [UIColor systemGreenColor];
 
-      self.cardContainer.layer.borderColor = restoreColor.CGColor;
+      self.cardBorderColor = restoreColor;
       self.cardContainer.backgroundColor =
-          [restoreColor colorWithAlphaComponent:0.08];
+          [VMUIHelper cardColor];
       self.statusIndicator.backgroundColor = restoreColor;
 
       self.hexDisplayLabel.textColor = [UIColor secondaryLabelColor];
@@ -395,7 +393,7 @@
 
       [self updateButton:_btnToggle
                    title:TR(@"Btn_Inject")
-                   color:[UIColor systemGreenColor]
+                   color:[VMUIHelper accentColor]
                   filled:YES];
     }
   };
@@ -411,27 +409,11 @@
   }
 }
 
-- (void)updateButton:(UIButton *)btn
-               title:(NSString *)title
-               color:(UIColor *)color
-              filled:(BOOL)filled {
-  if (@available(iOS 15.0, *)) {
-    UIButtonConfiguration *conf = btn.configuration;
-    conf.baseBackgroundColor = filled ? color : [UIColor systemGray6Color];
-    conf.baseForegroundColor =
-        filled ? [UIColor whiteColor] : [UIColor labelColor];
-
-    NSDictionary *attrs = @{
-      NSFontAttributeName : [UIFont systemFontOfSize:13 weight:UIFontWeightBold]
-    };
-    conf.attributedTitle = [[NSAttributedString alloc] initWithString:title
-                                                           attributes:attrs];
-    btn.configuration = conf;
-  } else {
-    [btn setTitle:title forState:UIControlStateNormal];
-    btn.backgroundColor = filled ? color : [UIColor systemGray6Color];
-    btn.tintColor = filled ? [UIColor whiteColor] : [UIColor labelColor];
-  }
+- (void)updateButton:(UIButton *)button title:(NSString *)title color:(UIColor *)color filled:(BOOL)filled {
+  button.tintColor = color;
+  [button setTitle:title forState:UIControlStateNormal];
+  button.accessibilityLabel = title;
+  [VMUIHelper styleButton:button primary:filled];
 }
 
 - (void)onEditTap {

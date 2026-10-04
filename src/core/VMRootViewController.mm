@@ -9,16 +9,32 @@
 #import "../ui/pointer/VMPointerSearchViewController.h"
 #import "../ui/pointer/VMSavedPointersViewController.h"
 #import "../utils/managers/VMUpdateManager.h"
+#import "../utils/helpers/VMLanguageRefresh.h"
+#import "../utils/helpers/VMUIHelper.h"
 #define TR(key) ([[VMLocalization shared] localizedString:key])
 
 static NSString *const kVMTabOrderKey = @"vm_bottom_tab_order";
+
+static BOOL VMBrandOverlapsActions(UIView *view, UIView *container, CGRect brandFrame) {
+  if (view.hidden || view.alpha < .01) return NO;
+  CGRect frame = [view convertRect:view.bounds toView:container];
+  BOOL intersects = CGRectIntersectsRect(frame, brandFrame);
+  if (intersects && ([view.accessibilityIdentifier isEqualToString:@"vmBrandingAvoidance"] ||
+      [view isKindOfClass:UIToolbar.class])) return YES;
+  if (view.clipsToBounds && !intersects) return NO;
+  for (UIView *child in view.subviews)
+    if (VMBrandOverlapsActions(child, container, brandFrame)) return YES;
+  return NO;
+}
 
 @interface VMTabReorderCell : UITableViewCell
 @end
 @implementation VMTabReorderCell
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)rid {
   if (self = [super initWithStyle:UITableViewCellStyleDefault reuseIdentifier:rid]) {
-    self.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+    self.textLabel.font = [VMUIHelper scaledFontOfSize:16 weight:UIFontWeightMedium];
+    self.textLabel.adjustsFontForContentSizeCategory = YES;
+    self.textLabel.numberOfLines = 0;
     self.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
   }
   return self;
@@ -36,6 +52,12 @@ static NSString *const kVMTabOrderKey = @"vm_bottom_tab_order";
   [super viewDidLoad];
   self.title = TR(@"Set_Tab_Reorder");
   self.tableView.editing = YES;
+  [VMUIHelper styleTableView:self.tableView];
+  self.tableView.rowHeight = UITableViewAutomaticDimension;
+  self.tableView.estimatedRowHeight = 60;
+  self.tableView.tableHeaderView = [VMUIHelper contextHeaderWithText:TR(@"Set_Tab_Reorder_Hint") symbol:@"arrow.up.arrow.down"];
+  self.tableView.tableHeaderView.layoutMargins = UIEdgeInsetsMake(8, 20, 8, 20);
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
   self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
   [self.tableView registerClass:[VMTabReorderCell class] forCellReuseIdentifier:@"Cell"];
   
@@ -44,11 +66,17 @@ static NSString *const kVMTabOrderKey = @"vm_bottom_tab_order";
                                        style:UIBarButtonItemStyleDone
                                       target:self
                                       action:@selector(doneTapped)];
+  [VMUIHelper styleConfirmationItem:self.navigationItem.rightBarButtonItem];
   self.navigationItem.leftBarButtonItem =
       [[UIBarButtonItem alloc] initWithTitle:TR(@"Btn_Restore_Default")
                                        style:UIBarButtonItemStylePlain
                                       target:self
                                       action:@selector(resetTapped)];
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
 }
 
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
@@ -120,6 +148,10 @@ static NSString *const kVMTabOrderKey = @"vm_bottom_tab_order";
 
 @interface VMRootViewController () <UITabBarControllerDelegate>
 @property(nonatomic, strong) NSArray<UINavigationController *> *allNavControllers;
+@property(nonatomic, strong) UIView *brandingFooter;
+@property(nonatomic, copy) NSString *brandingIconName;
+@property(nonatomic) CGRect brandingKeyboardFrame;
+
 @end
 @implementation VMRootViewController
 - (void)viewDidLoad {
@@ -165,6 +197,17 @@ static NSString *const kVMTabOrderKey = @"vm_bottom_tab_order";
                                       tag:4];
 
   self.allNavControllers = @[ nav1, nav2, navPatch, nav4, nav5 ];
+  NSArray *selectedSymbols = @[@"square.grid.2x2.fill", @"slider.horizontal.3", @"cpu.fill", @"shippingbox.fill", @"gearshape.fill"];
+  NSArray *symbols = @[@"square.grid.2x2", @"slider.horizontal.3", @"cpu", @"shippingbox", @"gearshape"];
+  for (NSUInteger i = 0; i < self.allNavControllers.count; i++) {
+    UINavigationController *nav = self.allNavControllers[i];
+    [VMUIHelper applyNavigationAppearance:nav];
+    nav.tabBarItem.image = [UIImage systemImageNamed:symbols[i]];
+    nav.tabBarItem.selectedImage = [UIImage systemImageNamed:selectedSymbols[i]];
+  }
+  self.view.tintColor = VMUIHelper.accentColor;
+  self.tabBar.tintColor = VMUIHelper.accentColor;
+  self.tabBar.unselectedItemTintColor = UIColor.secondaryLabelColor;
   
   [self applyTabOrder];
   self.delegate = self;
@@ -191,11 +234,91 @@ static NSString *const kVMTabOrderKey = @"vm_bottom_tab_order";
   lp.minimumPressDuration = 0.5;
   [self.tabBar addGestureRecognizer:lp];
   
+  NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+  [center addObserver:self selector:@selector(refreshBranding) name:UIApplicationDidBecomeActiveNotification object:nil];
+  [center addObserver:self selector:@selector(refreshBranding) name:@"VMApplicationIconDidChange" object:nil];
+  [center addObserver:self selector:@selector(brandingKeyboardChanged:) name:UIKeyboardWillChangeFrameNotification object:nil];
+  [center addObserver:self selector:@selector(brandingKeyboardHidden:) name:UIKeyboardWillHideNotification object:nil];
+  [self refreshBranding];
   [[VMUpdateManager shared] performAutoCheck];
+}
+
+- (void)refreshBranding {
+  NSString *iconName = UIApplication.sharedApplication.alternateIconName ?: @"";
+  if (!self.brandingFooter || ![self.brandingIconName isEqualToString:iconName]) {
+    [self.brandingFooter removeFromSuperview];
+    self.brandingIconName = iconName;
+    self.brandingFooter = [VMUIHelper createVansonFooterViewForWidth:self.view.bounds.size.width];
+    [self.view addSubview:self.brandingFooter];
+  }
+  [self.view setNeedsLayout];
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  [self refreshBrandingOverlay];
+}
+
+- (void)refreshBrandingOverlay {
+  if (!self.brandingFooter) return;
+  CGRect bar = [self.tabBar convertRect:self.tabBar.bounds toView:self.view];
+  UINavigationController *selected = (id)self.selectedViewController;
+  BOOL visible = !self.tabBar.hidden && self.tabBar.alpha > .01 &&
+      !selected.topViewController.hidesBottomBarWhenPushed &&
+      CGRectGetHeight(bar) > 0 && CGRectGetMidY(bar) > CGRectGetMidY(self.view.bounds) &&
+      CGRectGetMinY(bar) < CGRectGetMaxY(self.view.bounds);
+  CGSize size = [self.brandingFooter systemLayoutSizeFittingSize:UILayoutFittingCompressedSize];
+  // A transparent, touch-through overlay; page safe areas belong to the native tab bar.
+  self.brandingFooter.frame = CGRectMake(round((self.view.bounds.size.width - size.width) / 2),
+      CGRectGetMinY(bar) - size.height - 2, size.width, size.height);
+  BOOL keyboardCoversBrand = NO;
+  UIWindow *window = self.view.window;
+  if (window && !CGRectIsEmpty(self.brandingKeyboardFrame)) {
+    CGRect windowFrame = [window convertRect:self.brandingKeyboardFrame fromCoordinateSpace:window.screen.coordinateSpace];
+    CGRect frame = [self.view convertRect:windowFrame fromView:window];
+    keyboardCoversBrand = CGRectIntersectsRect(frame, self.brandingFooter.frame);
+  }
+  self.brandingFooter.hidden = !visible || keyboardCoversBrand ||
+      VMBrandOverlapsActions(selected.view, self.view, self.brandingFooter.frame);
+  [self.view bringSubviewToFront:self.brandingFooter];
+}
+
+- (void)brandingKeyboardChanged:(NSNotification *)notification {
+  self.brandingKeyboardFrame = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+  [self.view setNeedsLayout];
+}
+
+- (void)brandingKeyboardHidden:(NSNotification *)notification {
+  self.brandingKeyboardFrame = CGRectZero;
+  [self.view setNeedsLayout];
 }
 
 - (BOOL)shouldAutorotate {
   return YES;
+}
+
+- (void)refreshLocalizedPages {
+  NSAssert(NSThread.isMainThread, @"Language refresh must run on the main thread");
+  NSArray<Class> *classes = @[
+    VMAppSelectViewController.class, VMModifierViewController.class,
+    VMPatcherViewController.class, VMLockListViewController.class, VMSettingsViewController.class
+  ];
+  NSArray<NSString *> *keys = @[@"Tab_App", @"Tab_Mod", @"Tab_Patch", @"Tab_Toolbox", @"Tab_Set"];
+  // Keep the window, tab controller, navigation controllers, selection and tab order.
+  // Offscreen root pages stay unloaded until the user opens their tab.
+  for (NSUInteger i = 0; i < self.allNavControllers.count; i++) {
+    VMLanguageTrace([NSString stringWithFormat:@"refresh-page-%lu-begin", (unsigned long)i]);
+    UINavigationController *nav = self.allNavControllers[i];
+    for (UIViewController *page in nav.viewControllers) {
+      if ([page isKindOfClass:VMLockListViewController.class])
+        [(VMLockListViewController *)page prepareForLanguageRefresh];
+    }
+    UIViewController *page = [[classes[i] alloc] init];
+    [nav setViewControllers:@[page] animated:NO];
+    nav.tabBarItem.title = TR(keys[i]);
+    VMLanguageTrace([NSString stringWithFormat:@"refresh-page-%lu-end", (unsigned long)i]);
+  }
+  [self handleUpdateBadge];
 }
 
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
@@ -213,28 +336,26 @@ static NSString *const kVMTabOrderKey = @"vm_bottom_tab_order";
 #pragma mark - [v2.6] Tab 排序
 
 - (void)applyTabOrder {
-  NSArray<NSNumber *> *savedOrder = [[NSUserDefaults standardUserDefaults] arrayForKey:kVMTabOrderKey];
-  if (!savedOrder || savedOrder.count != self.allNavControllers.count) {
-    
-    self.viewControllers = [self.allNavControllers copy];
-    return;
-  }
-  NSMutableArray *ordered = [NSMutableArray arrayWithCapacity:savedOrder.count];
-  for (NSNumber *tag in savedOrder) {
-    NSInteger t = tag.integerValue;
-    if (t >= 0 && t < (NSInteger)self.allNavControllers.count) {
-      [ordered addObject:self.allNavControllers[t]];
+  UIViewController *selected = self.selectedViewController;
+  NSArray *savedOrder = [NSUserDefaults.standardUserDefaults arrayForKey:kVMTabOrderKey];
+  NSMutableArray *ordered = [NSMutableArray array];
+  NSMutableIndexSet *seen = [NSMutableIndexSet indexSet];
+  if (savedOrder.count == self.allNavControllers.count) {
+    for (id tag in savedOrder) {
+      if (![tag isKindOfClass:NSNumber.class]) break;
+      NSInteger index = [tag integerValue];
+      if (index < 0 || index >= (NSInteger)self.allNavControllers.count ||
+          [tag doubleValue] != (double)index || [seen containsIndex:index]) break;
+      [seen addIndex:index];
+      [ordered addObject:self.allNavControllers[index]];
     }
   }
-  if (ordered.count == self.allNavControllers.count) {
-    self.viewControllers = ordered;
-  } else {
-    self.viewControllers = [self.allNavControllers copy];
-  }
+  self.viewControllers = ordered.count == self.allNavControllers.count ? ordered : self.allNavControllers;
+  if (selected && [self.viewControllers containsObject:selected]) self.selectedViewController = selected;
 }
 
 - (void)handleTabBarLongPress:(UILongPressGestureRecognizer *)gesture {
-  if (gesture.state != UIGestureRecognizerStateBegan) return;
+  if (gesture.state != UIGestureRecognizerStateBegan || self.presentedViewController) return;
   
   UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
   [gen impactOccurred];
@@ -243,6 +364,7 @@ static NSString *const kVMTabOrderKey = @"vm_bottom_tab_order";
 }
 
 - (void)showTabReorder {
+  if (self.presentedViewController) return;
   VMTabReorderViewController *reorderVC = [[VMTabReorderViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
   
   NSMutableArray<NSDictionary *> *descs = [NSMutableArray array];
@@ -289,14 +411,11 @@ static NSString *const kVMTabOrderKey = @"vm_bottom_tab_order";
 
 - (void)handleUpdateBadge {
   dispatch_async(dispatch_get_main_queue(), ^{
-    if ([VMUpdateManager shared].hasNewVersion) {
-      
-      NSInteger settingsIdx = [self indexForTabTag:4];
-      if (settingsIdx != NSNotFound && settingsIdx < (NSInteger)self.tabBar.items.count) {
-        UITabBarItem *settingsItem = self.tabBar.items[settingsIdx];
-        settingsItem.badgeValue = @"1";
-        settingsItem.badgeColor = [UIColor systemRedColor];
-      }
+    NSInteger settingsIdx = [self indexForTabTag:4];
+    if (settingsIdx != NSNotFound && settingsIdx < (NSInteger)self.tabBar.items.count) {
+      UITabBarItem *item = self.tabBar.items[settingsIdx];
+      item.badgeValue = [VMUpdateManager shared].hasNewVersion ? @"1" : nil;
+      item.badgeColor = UIColor.systemRedColor;
     }
   });
 }

@@ -1,3 +1,4 @@
+#import "VMMemoryFeedback.h"
 #import "../main/VMLockListViewController.h"
 #import "../main/VMModifierViewController.h"
 #import "../memory/VMHexEditorViewController.h"
@@ -130,6 +131,7 @@
                           [noteAlert addTextFieldWithConfigurationHandler:^(
                                          UITextField *tf) {
                             tf.text = item[@"note"];
+                            tf.placeholder = TR(@"Placeholder_Note");
                           }];
                           [noteAlert
                               addAction:
@@ -143,7 +145,7 @@
                                                 if ([vc isKindOfClass:
                                                             [VMLockListViewController
                                                                 class]]) {
-                                                  
+
                                                   NSString *bid =
                                                       [[VMMemoryEngine shared]
                                                           currentBundleID];
@@ -232,7 +234,7 @@
   }
 
   if (isLockListVC && currentTab == 2 && item) {
-    VMPointerChain *chain = (VMPointerChain *)item; 
+    VMPointerChain *chain = (VMPointerChain *)item;
 
     if (!chain.isImported) {
 
@@ -387,6 +389,8 @@
                    inVC:(UIViewController *)vc {
 
   [vc.view endEditing:YES];
+  pid_t editingPid = [VMMemoryEngine shared].targetPid;
+  mach_port_t editingTask = [VMMemoryEngine shared].targetTask;
 
   if (type == VMDataTypeString) {
     [self showStringModifyAlert:address val:val inVC:vc];
@@ -402,6 +406,7 @@
 
   [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
     tf.text = val;
+    tf.placeholder = TR(@"Mod_Input_Value_Placeholder");
     if (type != VMDataTypeString)
       tf.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
   }];
@@ -411,6 +416,10 @@
                     actionWithTitle:TR(@"Btn_Confirm")
                               style:UIAlertActionStyleDestructive
                             handler:^(UIAlertAction *a) {
+                              if (editingPid != [VMMemoryEngine shared].targetPid || editingTask != [VMMemoryEngine shared].targetTask) {
+                                [self showToast:TR(@"Str_Target_Changed") inVC:vc];
+                                return;
+                              }
                               NSString *newVal =
                                   alert.textFields.firstObject.text;
                               NSString *oldVal =
@@ -423,18 +432,20 @@
                               NSData *oldData =
                                   [[VMMemoryEngine shared] readRawMemory:address
                                                                   length:oldSize];
-                              [[VMMemoryEngine shared]
-                                  rememberManualWriteUndoAtAddress:address
-                                                              type:type
-                                                          oldValue:oldVal
-                                                           oldData:oldData
-                                                          newValue:newVal];
 
-                              [[VMMemoryEngine shared] writeAddress:address
+                              BOOL success = [[VMMemoryEngine shared] writeAddress:address
                                                               value:newVal
                                                                type:type];
+                              if (success) {
+                                [[VMMemoryEngine shared]
+                                    rememberManualWriteUndoAtAddress:address
+                                                                type:type
+                                                            oldValue:oldVal
+                                                             oldData:oldData
+                                                            newValue:newVal];
+                              }
 
-                              [self showToast:TR(@"Msg_Mod_Success") inVC:vc];
+                              [self showToast:TR(success ? @"Msg_Mod_Success" : @"Err_Write_Permission") inVC:vc];
 
                               if ([vc respondsToSelector:@selector
                                       (doRefreshValues)]) {
@@ -561,27 +572,27 @@
 
                         uint64_t targetAddr = 0;
                         int64_t offset = 0;
-                        
+
                         if ([input hasPrefix:@"+"] || [input hasPrefix:@"-"]) {
-                          
+
                           BOOL isNegative = [input hasPrefix:@"-"];
                           NSString *numPart = [input substringFromIndex:1];
                           numPart = [numPart stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                          
+
                           if ([numPart.lowercaseString hasPrefix:@"0x"]) {
                             offset = strtoull([[numPart substringFromIndex:2] UTF8String], NULL, 16);
                           } else {
                             offset = strtoull([numPart UTF8String], NULL, 10);
                           }
-                          
+
                           if (isNegative) offset = -offset;
                           targetAddr = baseAddr + offset;
                         } else if ([input.lowercaseString hasPrefix:@"0x"]) {
-                          
+
                           targetAddr = strtoull([[input substringFromIndex:2] UTF8String], NULL, 16);
                           offset = (int64_t)(targetAddr - baseAddr);
                         } else {
-                          
+
                           offset = strtoll([input UTF8String], NULL, 10);
                           targetAddr = baseAddr + offset;
                         }
@@ -639,33 +650,7 @@
 }
 
 + (void)showToast:(NSString *)msg inVC:(UIViewController *)vc {
-  UIAlertController *alert =
-      [UIAlertController alertControllerWithTitle:nil
-                                          message:msg
-                                   preferredStyle:UIAlertControllerStyleAlert];
-
-  dispatch_async(dispatch_get_main_queue(), ^{
-    UIViewController *top = vc;
-    while (top.presentedViewController) {
-      if (top.presentedViewController.isBeingDismissed) {
-        dispatch_after(
-            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
-            dispatch_get_main_queue(), ^{
-              [self showToast:msg inVC:vc];
-            });
-        return;
-      }
-      top = top.presentedViewController;
-    }
-
-    [top presentViewController:alert animated:YES completion:nil];
-
-    dispatch_after(
-        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
-        dispatch_get_main_queue(), ^{
-          [alert dismissViewControllerAnimated:YES completion:nil];
-        });
-  });
+    VMMemoryShowFeedback(vc, msg);
 }
 
 + (void)showAddToLockAlert:(uint64_t)addr
@@ -816,7 +801,7 @@
 
 + (void)launchPointerSearchFrom:(UIViewController *)currentVC
                   targetAddress:(uint64_t)addr {
-  
+
   VMPointerSearchViewController *ptrVC =
       [[VMPointerSearchViewController alloc] init];
   ptrVC.targetAddress = addr;

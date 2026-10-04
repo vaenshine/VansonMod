@@ -1,5 +1,6 @@
 #import "../pointer/VMPointerSearchViewController.h"
 #import "../../utils/helpers/VMUIHelper.h"
+#import "../../utils/helpers/VMKeyboardAvoidance.h"
 #import "../main/VMLockListViewController.h"
 #import "../memory/VMModuleListViewController.h"
 #import "../pointer/VMPointerSessionListViewController.h"
@@ -18,6 +19,7 @@
     UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
 
 @property(nonatomic, strong) UIView *headerView;
+@property(nonatomic, strong) UIStackView *configStack;
 @property(nonatomic, strong) UITableView *tableView;
 
 @property(nonatomic, strong) UITextField *targetField; 
@@ -60,6 +62,7 @@
               style:UIBarButtonItemStylePlain
              target:self
              action:@selector(directSaveStaticPointers)];
+  saveBtn.accessibilityLabel = TR(@"Btn_Save");
   self.navigationItem.rightBarButtonItem = saveBtn;
 
   [self setupUI];
@@ -85,175 +88,86 @@
 #pragma mark - UI Setup (重构版)
 
 - (void)setupUI {
-  
-  self.tableView =
-      [[UITableView alloc] initWithFrame:CGRectZero
-                                   style:UITableViewStyleInsetGrouped];
+  self.view.tintColor = [VMUIHelper accentColor];
+  self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
+  self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   self.tableView.delegate = self;
   self.tableView.dataSource = self;
-  self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-  self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
-  if (@available(iOS 15.0, *))
-    self.tableView.sectionHeaderTopPadding = 0;
+  [VMUIHelper styleTableView:self.tableView];
   [self.view addSubview:self.tableView];
+  [VMKeyboardAvoidance installForScrollView:self.tableView];
 
-  [NSLayoutConstraint activateConstraints:@[
-    [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-    [self.tableView.bottomAnchor
-        constraintEqualToAnchor:self.view.bottomAnchor],
-    [self.tableView.leadingAnchor
-        constraintEqualToAnchor:self.view.leadingAnchor],
-    [self.tableView.trailingAnchor
-        constraintEqualToAnchor:self.view.trailingAnchor]
-  ]];
-
-  UIView *headerWrapper = [[UIView alloc]
-      initWithFrame:CGRectMake(0, 0, [UIScreen mainScreen].bounds.size.width,
-                               220)];
-  headerWrapper.backgroundColor = [UIColor clearColor];
-
-  self.headerView = [[UIView alloc] init];
-  self.headerView.backgroundColor =
-      [UIColor secondarySystemGroupedBackgroundColor];
-  self.headerView.layer.cornerRadius = 12;
-  self.headerView.layer.masksToBounds = YES;
-  self.headerView.translatesAutoresizingMaskIntoConstraints = NO;
-  [headerWrapper addSubview:self.headerView];
-
-  UIStackView *mainStack = [[UIStackView alloc] init];
-  mainStack.axis = UILayoutConstraintAxisVertical;
-  mainStack.spacing = 12;
-  mainStack.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.headerView addSubview:mainStack];
-
-  UILabel *secTitle1 =
-      [self createSectionTitle:TR(@"RVA_Section_Target")]; 
-  [mainStack addArrangedSubview:secTitle1];
-
-  self.targetField = [self createTextField:TR(@"Ptr_Target_Label")
-                               placeholder:TR(@"Placeholder_Hex_Short")];
-  self.targetField.text =
-      (self.targetAddress > 0)
-          ? [NSString stringWithFormat:@"%llX", self.targetAddress]
-          : @"";
-  [mainStack addArrangedSubview:self.targetField];
-
-  self.moduleField = [self createTextField:TR(@"Patch_Base")
-                               placeholder:TR(@"Placeholder_Auto_Search")];
+  UIView *wrapper = [UIView new];
+  UIStackView *layout = [UIStackView new];
+  layout.axis = UILayoutConstraintAxisVertical;
+  layout.spacing = 16;
+  layout.translatesAutoresizingMaskIntoConstraints = NO;
+  [wrapper addSubview:layout];
+  self.headerView = [UIView new];
+  [VMUIHelper styleCard:self.headerView];
+  UIStackView *form = [UIStackView new];
+  form.axis = UILayoutConstraintAxisVertical;
+  form.spacing = 12;
+  form.translatesAutoresizingMaskIntoConstraints = NO;
+  [self.headerView addSubview:form];
+  [form addArrangedSubview:[self createSectionTitle:TR(@"RVA_Section_Target")]];
+  self.targetField = [self createTextField:TR(@"Ptr_Target_Label") placeholder:TR(@"Placeholder_Hex_Short")];
+  self.targetField.text = self.targetAddress > 0 ? [NSString stringWithFormat:@"%llX", self.targetAddress] : @"";
+  self.targetField.delegate = self;
+  [form addArrangedSubview:self.targetField];
+  [form addArrangedSubview:[self createSectionTitle:TR(@"Patch_Base")]];
+  self.moduleField = [self createTextField:TR(@"Patch_Base") placeholder:TR(@"Placeholder_Auto_Search")];
   self.moduleField.text = TR(@"Placeholder_Auto_Search");
-  self.moduleField.textColor = [UIColor systemGrayColor];
   self.moduleField.delegate = self;
   [self addSelectButtonToField:self.moduleField];
-  [mainStack addArrangedSubview:self.moduleField];
+  [form addArrangedSubview:self.moduleField];
+  [form addArrangedSubview:[self createSectionTitle:TR(@"Ptr_Auto_Config_Title")]];
+  self.depthField = [self createConfigField:TR(@"Placeholder_Depth") val:@"7" pad:UIKeyboardTypeNumberPad];
+  self.offsetField = [self createConfigField:TR(@"Placeholder_Max_Offset") val:@"2000" pad:UIKeyboardTypeASCIICapable];
+  self.limitField = [self createConfigField:TR(@"Placeholder_Limit") val:@"500000" pad:UIKeyboardTypeNumberPad];
+  for (UITextField *field in @[self.depthField, self.offsetField, self.limitField]) field.delegate = self;
+  self.configStack = [UIStackView new];
+  self.configStack.axis = UILayoutConstraintAxisHorizontal;
+  self.configStack.distribution = UIStackViewDistributionFillEqually;
+  self.configStack.spacing = 12;
+  [self.configStack addArrangedSubview:[self wrapConfigField:self.depthField title:TR(@"Placeholder_Depth")]];
+  [self.configStack addArrangedSubview:[self wrapConfigField:self.offsetField title:TR(@"Placeholder_Max_Offset")]];
+  [self.configStack addArrangedSubview:[self wrapConfigField:self.limitField title:TR(@"Placeholder_Limit")]];
+  [form addArrangedSubview:self.configStack];
+  self.startBtn = [VMUIHelper createButtonWithTitle:TR(@"Ptr_Btn_Auto_Search") color:[VMUIHelper accentColor] target:self action:@selector(handleStartAction)];
+  [VMUIHelper styleButton:self.startBtn primary:YES];
+  [self.startBtn.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [form addArrangedSubview:self.startBtn];
+  [layout addArrangedSubview:self.headerView];
 
-  UILabel *secTitle2 =
-      [self createSectionTitle:TR(@"Ptr_Auto_Config_Title")]; 
-  [mainStack addArrangedSubview:secTitle2];
-
-  UIStackView *configStack = [[UIStackView alloc] init];
-  configStack.axis = UILayoutConstraintAxisHorizontal;
-  configStack.distribution = UIStackViewDistributionFillEqually;
-  configStack.spacing = 10;
-
-  self.depthField = [self createConfigField:TR(@"Placeholder_Depth")
-                                        val:@"7"
-                                        pad:UIKeyboardTypeNumberPad];
-  self.depthField.delegate = self;
-  
-  self.offsetField = [self createConfigField:TR(@"Placeholder_Max_Offset")
-                                         val:@"2000"
-                                         pad:UIKeyboardTypeASCIICapable];
-  self.offsetField.delegate = self;
-  
-  self.limitField = [self createConfigField:TR(@"Placeholder_Limit")
-                                        val:@"500000"
-                                        pad:UIKeyboardTypeNumberPad];
-  self.limitField.delegate = self;
-
-  [configStack
-      addArrangedSubview:[self wrapConfigField:self.depthField
-                                         title:TR(@"Placeholder_Depth")]];
-  [configStack
-      addArrangedSubview:[self wrapConfigField:self.offsetField
-                                         title:TR(@"Placeholder_Max_Offset")]];
-  [configStack
-      addArrangedSubview:[self wrapConfigField:self.limitField
-                                         title:TR(@"Placeholder_Limit")]];
-
-  [mainStack addArrangedSubview:configStack];
-
-  self.startBtn =
-      [VMUIHelper createButtonWithTitle:TR(@"Ptr_Btn_Auto_Search")
-                                  color:[UIColor systemPurpleColor]
-                                 target:self
-                                 action:@selector(handleStartAction)];
-  [self.startBtn.heightAnchor constraintEqualToConstant:44].active = YES;
-  [mainStack addArrangedSubview:self.startBtn];
-
-  [NSLayoutConstraint activateConstraints:@[
-    [self.headerView.topAnchor constraintEqualToAnchor:headerWrapper.topAnchor
-                                              constant:10],
-    [self.headerView.leadingAnchor
-        constraintEqualToAnchor:headerWrapper.leadingAnchor
-                       constant:12],
-    [self.headerView.trailingAnchor
-        constraintEqualToAnchor:headerWrapper.trailingAnchor
-                       constant:-12],
-    [self.headerView.bottomAnchor
-        constraintEqualToAnchor:headerWrapper.bottomAnchor
-                       constant:-10],
-
-    [mainStack.topAnchor constraintEqualToAnchor:self.headerView.topAnchor
-                                        constant:16],
-    [mainStack.leadingAnchor
-        constraintEqualToAnchor:self.headerView.leadingAnchor
-                       constant:16],
-    [mainStack.trailingAnchor
-        constraintEqualToAnchor:self.headerView.trailingAnchor
-                       constant:-16],
-    [mainStack.bottomAnchor constraintEqualToAnchor:self.headerView.bottomAnchor
-                                           constant:-16]
-  ]];
-
-  self.statsContainer = [[UIView alloc] init];
-  self.statsContainer.backgroundColor =
-      [UIColor tertiarySystemGroupedBackgroundColor];
-  self.statsContainer.layer.cornerRadius = 8;
-  self.statsContainer.clipsToBounds = YES;
-  self.statsContainer.translatesAutoresizingMaskIntoConstraints = NO;
-  [headerWrapper addSubview:self.statsContainer];
-
-  self.statsLabel = [[UILabel alloc] init];
-  self.statsLabel.textAlignment = NSTextAlignmentCenter;
-  self.statsLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
-  self.statsLabel.textColor = [UIColor secondaryLabelColor];
+  self.statsContainer = [UIView new];
+  [VMUIHelper styleCard:self.statsContainer];
+  self.statsContainer.backgroundColor = [[VMUIHelper accentColor] colorWithAlphaComponent:0.08];
+  self.statsLabel = [UILabel new];
+  self.statsLabel.font = [VMUIHelper scaledFontOfSize:14 weight:UIFontWeightSemibold];
+  self.statsLabel.adjustsFontForContentSizeCategory = YES;
+  self.statsLabel.numberOfLines = 0;
+  self.statsLabel.textColor = [VMUIHelper accentColor];
   self.statsLabel.translatesAutoresizingMaskIntoConstraints = NO;
   [self.statsContainer addSubview:self.statsLabel];
-
+  [layout addArrangedSubview:self.statsContainer];
   [NSLayoutConstraint activateConstraints:@[
-    [self.statsLabel.centerXAnchor
-        constraintEqualToAnchor:self.statsContainer.centerXAnchor],
-    [self.statsLabel.centerYAnchor
-        constraintEqualToAnchor:self.statsContainer.centerYAnchor],
-
-    [self.statsContainer.topAnchor
-        constraintEqualToAnchor:self.headerView.bottomAnchor
-                       constant:12],
-    [self.statsContainer.leadingAnchor
-        constraintEqualToAnchor:headerWrapper.leadingAnchor
-                       constant:12],
-    [self.statsContainer.trailingAnchor
-        constraintEqualToAnchor:headerWrapper.trailingAnchor
-                       constant:-12],
-    [self.statsContainer.heightAnchor constraintEqualToConstant:30],
+    [layout.leadingAnchor constraintEqualToAnchor:wrapper.leadingAnchor constant:16],
+    [layout.trailingAnchor constraintEqualToAnchor:wrapper.trailingAnchor constant:-16],
+    [layout.topAnchor constraintEqualToAnchor:wrapper.topAnchor constant:16],
+    [layout.bottomAnchor constraintEqualToAnchor:wrapper.bottomAnchor constant:-16],
+    [form.leadingAnchor constraintEqualToAnchor:self.headerView.leadingAnchor constant:16],
+    [form.trailingAnchor constraintEqualToAnchor:self.headerView.trailingAnchor constant:-16],
+    [form.topAnchor constraintEqualToAnchor:self.headerView.topAnchor constant:16],
+    [form.bottomAnchor constraintEqualToAnchor:self.headerView.bottomAnchor constant:-16],
+    [self.statsLabel.leadingAnchor constraintEqualToAnchor:self.statsContainer.leadingAnchor constant:16],
+    [self.statsLabel.trailingAnchor constraintEqualToAnchor:self.statsContainer.trailingAnchor constant:-16],
+    [self.statsLabel.topAnchor constraintEqualToAnchor:self.statsContainer.topAnchor constant:12],
+    [self.statsLabel.bottomAnchor constraintEqualToAnchor:self.statsContainer.bottomAnchor constant:-12]
   ]];
-
-  CGRect hFrame = headerWrapper.frame;
-  hFrame.size.height += 40;
-  headerWrapper.frame = hFrame;
-
-  [self updateTableHeaderHeight:headerWrapper];
+  self.tableView.tableHeaderView = wrapper;
   [self updateStatsLabel];
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
 }
 
 - (void)updateStatsLabel {
@@ -270,86 +184,57 @@
 }
 
 - (UILabel *)createSectionTitle:(NSString *)text {
-  UILabel *l = [[UILabel alloc] init];
-  l.text = text;
-  l.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
-  l.textColor = [UIColor systemGrayColor];
-  return l;
+  UILabel *label = [UILabel new];
+  label.text = text;
+  label.numberOfLines = 0;
+  label.font = [VMUIHelper scaledFontOfSize:14 weight:UIFontWeightSemibold];
+  label.adjustsFontForContentSizeCategory = YES;
+  label.textColor = [UIColor secondaryLabelColor];
+  return label;
 }
 
-- (UITextField *)createTextField:(NSString *)label placeholder:(NSString *)ph {
-  UITextField *tf = [[UITextField alloc] init];
-  tf.borderStyle = UITextBorderStyleRoundedRect;
-  tf.placeholder = ph;
-  tf.font = [UIFont fontWithName:@"Menlo" size:13];
-  tf.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
-  [self addDoneButtonTo:tf];
-
-  if (label) {
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 70, 30)];
-    lbl.text = [NSString stringWithFormat:@" %@:", label];
-    lbl.font = [UIFont systemFontOfSize:12];
-    lbl.textColor = [UIColor systemGrayColor];
-    tf.leftView = lbl;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }
-
-  [tf.heightAnchor constraintEqualToConstant:36].active = YES;
-  return tf;
+- (UITextField *)createTextField:(NSString *)label placeholder:(NSString *)placeholder {
+  UITextField *field = [UITextField new];
+  field.placeholder = placeholder;
+  field.accessibilityLabel = label;
+  field.keyboardType = UIKeyboardTypeASCIICapable;
+  field.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
+  field.autocorrectionType = UITextAutocorrectionTypeNo;
+  [VMUIHelper styleTextField:field];
+  [field.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  field.font = [UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightMedium];
+  [self addDoneButtonTo:field];
+  return field;
 }
 
-- (UITextField *)createConfigField:(NSString *)ph
-                               val:(NSString *)val
-                               pad:(UIKeyboardType)pad {
-  UITextField *tf = [[UITextField alloc] init];
-  tf.borderStyle = UITextBorderStyleRoundedRect;
-  tf.text = val;
-  tf.placeholder = ph;
-  tf.font = [UIFont fontWithName:@"Menlo" size:12];
-  tf.textAlignment = NSTextAlignmentCenter;
-  tf.keyboardType = pad;
-  [self addDoneButtonTo:tf];
-  return tf;
+- (UITextField *)createConfigField:(NSString *)placeholder val:(NSString *)value pad:(UIKeyboardType)keyboard {
+  UITextField *field = [self createTextField:placeholder placeholder:placeholder];
+  field.text = value;
+  field.keyboardType = keyboard;
+  field.textAlignment = NSTextAlignmentCenter;
+  return field;
 }
 
-- (UIView *)wrapConfigField:(UITextField *)tf title:(NSString *)title {
-  UIStackView *v = [[UIStackView alloc] init];
-  v.axis = UILayoutConstraintAxisVertical;
-  v.spacing = 4;
-
-  UILabel *l = [[UILabel alloc] init];
-  l.text = title;
-  l.font = [UIFont systemFontOfSize:10];
-  l.textColor = [UIColor systemGrayColor];
-  l.textAlignment = NSTextAlignmentCenter;
-
-  [v addArrangedSubview:l];
-  [v addArrangedSubview:tf];
-  return v;
+- (UIView *)wrapConfigField:(UITextField *)field title:(NSString *)title {
+  UIStackView *stack = [UIStackView new];
+  stack.axis = UILayoutConstraintAxisVertical;
+  stack.spacing = 6;
+  [stack addArrangedSubview:[self createSectionTitle:title]];
+  [stack addArrangedSubview:field];
+  return stack;
 }
 
 - (void)updateTableHeaderHeight:(UIView *)header {
-  if (!header)
-    return;
-  CGFloat width = self.tableView.bounds.size.width;
-  if (width <= 0)
-    width = [UIScreen mainScreen].bounds.size.width;
-
-  header.bounds = CGRectMake(0, 0, width, header.bounds.size.height);
-  [header setNeedsLayout];
-  [header layoutIfNeeded];
-
-  CGSize size =
-      [header systemLayoutSizeFittingSize:UILayoutFittingCompressedSize];
-  CGRect frame = header.frame;
-  frame.size.height = size.height;
-  header.frame = frame;
-  self.tableView.tableHeaderView = header;
+  if (self.tableView.tableHeaderView != header) self.tableView.tableHeaderView = header;
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
 }
 
 - (void)viewDidLayoutSubviews {
   [super viewDidLayoutSubviews];
-  [self updateTableHeaderHeight:self.tableView.tableHeaderView];
+  BOOL expanded = self.tableView.bounds.size.width < 375 || UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);
+  UILayoutConstraintAxis axis = expanded ? UILayoutConstraintAxisVertical : UILayoutConstraintAxisHorizontal;
+  if (self.configStack.axis != axis) self.configStack.axis = axis;
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
 }
 
 #pragma mark - Actions
@@ -485,7 +370,7 @@
 
   [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
     tf.text = defaultName;
-    tf.placeholder = defaultName;
+    tf.placeholder = TR(@"Verifier_File_Name");
     tf.clearButtonMode = UITextFieldViewModeWhileEditing;
   }];
 
@@ -577,44 +462,18 @@
                       actionWithTitle:TR(@"Btn_Go_Verify")
                                 style:UIAlertActionStyleDefault
                               handler:^(UIAlertAction *action) {
-                                UITabBarController *tabBar =
-                                    self.tabBarController;
-                                if (tabBar &&
-                                    tabBar.viewControllers.count > 3) {
-                                  
-                                  if (tabBar.viewControllers.count <= 3)
-                                    return;
-                                  UIViewController *vc =
-                                      tabBar.viewControllers[3];
-                                  if (![vc isKindOfClass:[UINavigationController
-                                                             class]]) {
-                                    tabBar.selectedIndex = 3;
-                                    return;
-                                  }
-
-                                  UINavigationController *nav =
-                                      (UINavigationController *)vc;
-                                  id rootVC = nav.viewControllers.firstObject;
-
-                                  if ([rootVC respondsToSelector:@selector
-                                              (setDefaultTabIndex:)]) {
-                                    [rootVC setValue:@(5)
-                                              forKey:@"defaultTabIndex"];
-                                  }
-                                  if ([rootVC respondsToSelector:@selector
-                                              (setAutoOpenVerifierPath:)]) {
-                                    [rootVC setValue:path
-                                              forKey:@"autoOpenVerifierPath"];
-                                  }
-
+                                UITabBarController *tabBar = self.tabBarController;
+                                for (UIViewController *controller in tabBar.viewControllers) {
+                                  if (![controller isKindOfClass:UINavigationController.class]) continue;
+                                  UINavigationController *nav = (UINavigationController *)controller;
+                                  VMLockListViewController *root = (id)nav.viewControllers.firstObject;
+                                  if (![root isKindOfClass:VMLockListViewController.class]) continue;
+                                  root.defaultTabIndex = 5;
+                                  root.autoOpenVerifierPath = path;
                                   [nav popToRootViewControllerAnimated:NO];
-                                  tabBar.selectedIndex = 3;
-
-                                  if ([rootVC respondsToSelector:@selector
-                                              (tabChanged)]) {
-                                    [rootVC
-                                        performSelector:@selector(tabChanged)];
-                                  }
+                                  tabBar.selectedViewController = nav;
+                                  if ([root respondsToSelector:@selector(tabChanged)]) [root performSelector:@selector(tabChanged)];
+                                  break;
                                 }
                               }]];
   }
@@ -682,7 +541,7 @@
     if (symbol) {
       cell.detailTextLabel.textColor = [UIColor systemGreenColor];
     } else {
-      cell.detailTextLabel.textColor = [UIColor grayColor];
+      cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     }
   }
   return cell;
@@ -833,6 +692,7 @@
       initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                            target:tf
                            action:@selector(resignFirstResponder)];
+  [VMUIHelper styleConfirmationItem:done];
   tb.items = @[
     [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
@@ -843,25 +703,15 @@
   tf.inputAccessoryView = tb;
 }
 
-- (void)addSelectButtonToField:(UITextField *)tf {
-  UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-  [btn setTitle:TR(@"Btn_Select_Fwk") forState:UIControlStateNormal];
-  [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-  btn.backgroundColor = [UIColor systemBlueColor];
-  btn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-  btn.layer.cornerRadius = 6;
-  btn.frame = CGRectMake(0, 0, 60, 28);
-
-  UIView *rightView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 68, 28)];
-  [rightView addSubview:btn];
-  btn.frame = CGRectMake(4, 0, 60, 28);
-
-  [btn addTarget:self
-                action:@selector(openModuleListSelector)
-      forControlEvents:UIControlEventTouchUpInside];
-
-  tf.rightView = rightView;
-  tf.rightViewMode = UITextFieldViewModeAlways;
+- (void)addSelectButtonToField:(UITextField *)field {
+  UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+  [button setImage:[UIImage systemImageNamed:@"chevron.down.circle.fill"] forState:UIControlStateNormal];
+  button.tintColor = [VMUIHelper accentColor];
+  button.accessibilityLabel = TR(@"Btn_Select_Fwk");
+  button.frame = CGRectMake(0, 0, 44, 44);
+  [button addTarget:self action:@selector(openModuleListSelector) forControlEvents:UIControlEventTouchUpInside];
+  field.rightView = button;
+  field.rightViewMode = UITextFieldViewModeAlways;
 }
 
 - (BOOL)textFieldShouldBeginEditing:(UITextField *)textField {

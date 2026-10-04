@@ -1,4 +1,7 @@
 #import "VMLockListViewController.h"
+#import "../../core/VMRootViewController.h"
+#import "../common/VMFormSheetViewController.h"
+#import "../memory/VMStringMemorySession.h"
 #import "../../utils/helpers/VMShareHelper.h"
 #import "../../utils/helpers/VMUIHelper.h"
 #import "../../utils/managers/VMImportHandler.h"
@@ -27,6 +30,8 @@
 #include <mach/mach.h>
 #import <objc/runtime.h>
 #include <sys/sysctl.h>
+#include <errno.h>
+#include <stdlib.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,7 +45,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 #endif
 #define TR(key) ([[VMLocalization shared] localizedString:key])
 #define kCardCornerRadius 16.0
-#define kButtonHeight 34.0
+#define kButtonHeight 44.0
 @protocol VMItemCardCellDelegate <NSObject>
 @optional
 - (void)itemCellDidToggleSwitch:(UITableViewCell *)cell isOn:(BOOL)isOn;
@@ -71,72 +76,57 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 }
 
 - (void)setupCompactUI {
-  _bgView = [[UIView alloc] init];
-  _bgView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-  _bgView.layer.cornerRadius = 10;
-  _bgView.layer.shadowColor = [UIColor blackColor].CGColor;
-  _bgView.layer.shadowOpacity = 0.03;
-  _bgView.layer.shadowOffset = CGSizeMake(0, 1);
-  _bgView.layer.shadowRadius = 2;
+  _bgView = [UIView new];
+  [VMUIHelper styleCard:_bgView];
   _bgView.translatesAutoresizingMaskIntoConstraints = NO;
   [self.contentView addSubview:_bgView];
-
-  _lblNote = [[UILabel alloc] init];
-  _lblNote.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
-  _lblNote.textColor = [UIColor labelColor];
-  _lblNote.translatesAutoresizingMaskIntoConstraints = NO;
-  [_bgView addSubview:_lblNote];
-
-  _lblAddr = [[UILabel alloc] init];
-  _lblAddr.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
-  _lblAddr.textColor = [UIColor secondaryLabelColor];
-  _lblAddr.translatesAutoresizingMaskIntoConstraints = NO;
-  [_bgView addSubview:_lblAddr];
-
-  _lblValue = [[UILabel alloc] init];
-  _lblValue.font = [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightBold];
-  _lblValue.textColor = [UIColor systemBlueColor];
-  _lblValue.textAlignment = NSTextAlignmentRight;
-  _lblValue.translatesAutoresizingMaskIntoConstraints = NO;
-  [_bgView addSubview:_lblValue];
-
-  _lockSwitch = [[UISwitch alloc] init];
-  _lockSwitch.transform = CGAffineTransformMakeScale(0.8, 0.8);
-  _lockSwitch.onTintColor = [UIColor systemGreenColor];
+  _lblNote = [UILabel new];
+  _lblNote.font = [VMUIHelper scaledFontOfSize:16 weight:UIFontWeightSemibold];
+  _lblNote.adjustsFontForContentSizeCategory = YES;
+  _lblNote.numberOfLines = 0;
+  _lblAddr = [UILabel new];
+  _lblAddr.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleFootnote]
+      scaledFontForFont:[UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular]];
+  _lblAddr.adjustsFontForContentSizeCategory = YES;
+  _lblAddr.textColor = UIColor.secondaryLabelColor;
+  _lblAddr.numberOfLines = 0;
+  _lblValue = [UILabel new];
+  _lblValue.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody]
+      scaledFontForFont:[UIFont monospacedSystemFontOfSize:18 weight:UIFontWeightSemibold]];
+  _lblValue.adjustsFontForContentSizeCategory = YES;
+  _lblValue.numberOfLines = 0;
+  UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:@[_lblNote, _lblAddr, _lblValue]];
+  content.axis = UILayoutConstraintAxisVertical;
+  content.spacing = 6;
+  content.translatesAutoresizingMaskIntoConstraints = NO;
+  [_bgView addSubview:content];
+  _lockSwitch = [UISwitch new];
+  _lockSwitch.onTintColor = [VMUIHelper accentColor];
+  _lockSwitch.accessibilityLabel = TR(@"Act_Lock");
   [_lockSwitch addTarget:self action:@selector(onSwitch:) forControlEvents:UIControlEventValueChanged];
   _lockSwitch.translatesAutoresizingMaskIntoConstraints = NO;
   [_bgView addSubview:_lockSwitch];
-
   _favIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"star.fill"]];
-  _favIcon.tintColor = [UIColor systemOrangeColor];
+  _favIcon.tintColor = UIColor.systemOrangeColor;
   _favIcon.contentMode = UIViewContentModeScaleAspectFit;
   _favIcon.hidden = YES;
   _favIcon.translatesAutoresizingMaskIntoConstraints = NO;
   [_bgView addSubview:_favIcon];
-
-  CGFloat p = 12.0;
-
   [NSLayoutConstraint activateConstraints:@[
-    [_bgView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:4],
-    [_bgView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-4],
-    [_bgView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:12],
-    [_bgView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
-    [_bgView.heightAnchor constraintGreaterThanOrEqualToConstant:60],
-    [_lblNote.topAnchor constraintEqualToAnchor:_bgView.topAnchor constant:p],
-    [_lblNote.leadingAnchor constraintEqualToAnchor:_bgView.leadingAnchor constant:p],
-    [_lblNote.trailingAnchor constraintLessThanOrEqualToAnchor:_lblValue.leadingAnchor constant:-10],
-    [_lblAddr.bottomAnchor constraintEqualToAnchor:_bgView.bottomAnchor constant:-p],
-    [_lblAddr.leadingAnchor constraintEqualToAnchor:_lblNote.leadingAnchor],
-    [_lblAddr.trailingAnchor constraintLessThanOrEqualToAnchor:_lblValue.leadingAnchor constant:-10],
+    [_bgView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6],
+    [_bgView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-6],
+    [_bgView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
+    [_bgView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
+    [content.topAnchor constraintEqualToAnchor:_bgView.topAnchor constant:16],
+    [content.bottomAnchor constraintEqualToAnchor:_bgView.bottomAnchor constant:-16],
+    [content.leadingAnchor constraintEqualToAnchor:_bgView.leadingAnchor constant:16],
+    [content.trailingAnchor constraintEqualToAnchor:_lockSwitch.leadingAnchor constant:-12],
+    [_lockSwitch.trailingAnchor constraintEqualToAnchor:_bgView.trailingAnchor constant:-16],
     [_lockSwitch.centerYAnchor constraintEqualToAnchor:_bgView.centerYAnchor],
-    [_lockSwitch.trailingAnchor constraintEqualToAnchor:_bgView.trailingAnchor constant:-10],
-    [_favIcon.centerYAnchor constraintEqualToAnchor:_bgView.centerYAnchor],
-    [_favIcon.trailingAnchor constraintEqualToAnchor:_bgView.trailingAnchor constant:-15],
-    [_favIcon.widthAnchor constraintEqualToConstant:20],
-    [_favIcon.heightAnchor constraintEqualToConstant:20],
-    [_lblValue.centerYAnchor constraintEqualToAnchor:_bgView.centerYAnchor],
-    [_lblValue.trailingAnchor constraintEqualToAnchor:_lockSwitch.leadingAnchor constant:-8],
-    [_lblValue.leadingAnchor constraintGreaterThanOrEqualToAnchor:_bgView.centerXAnchor constant:-40]
+    [_favIcon.centerXAnchor constraintEqualToAnchor:_lockSwitch.centerXAnchor],
+    [_favIcon.centerYAnchor constraintEqualToAnchor:_lockSwitch.centerYAnchor],
+    [_favIcon.widthAnchor constraintEqualToConstant:24],
+    [_favIcon.heightAnchor constraintEqualToConstant:24]
   ]];
 }
 
@@ -156,7 +146,8 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   _lblNote.text = (note && note.length > 0)
                       ? note
                       : (isFav ? TR(@"Mod_Menu_Fav") : TR(@"Lock_Title"));
-  _lblAddr.text = [NSString stringWithFormat:@"0x%llX", addr];
+  _lblAddr.text = [NSString stringWithFormat:@"%@ · 0x%llX", [self typeName:t], addr];
+  _lockSwitch.accessibilityLabel = [NSString stringWithFormat:@"%@ · %@", TR(@"Act_Lock"), _lblNote.text];
   _lblValue.text = valStr ?: @"--";
 
   if (isFav) {
@@ -174,11 +165,10 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     _lockSwitch.on = enabled;
 
     if (enabled) {
-      _bgView.layer.borderWidth = 1.0;
+      _bgView.layer.borderWidth = 0;
       _bgView.layer.borderColor = [UIColor systemGreenColor].CGColor;
-      _bgView.backgroundColor =
-          [[UIColor systemGreenColor] colorWithAlphaComponent:0.05];
-      _lblValue.textColor = [UIColor systemGreenColor];
+      _bgView.backgroundColor = [VMUIHelper cardColor];
+      _lblValue.textColor = [VMUIHelper accentColor];
     } else {
       _bgView.layer.borderWidth = 0;
       _bgView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
@@ -223,6 +213,11 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 @property(nonatomic, assign) UIBackgroundTaskIdentifier bgTask;
 @property(nonatomic, assign) NSInteger currentTab;
 @property(nonatomic, strong) UITableView *tableView;
+@property(nonatomic, strong) UIBarButtonItem *valueSnapshotButton;
+@property(nonatomic, strong) UIToolbar *batchToolbar;
+@property(nonatomic, assign) BOOL batchToolbarShown;
+@property(nonatomic, assign) CGFloat batchOriginalContentBottomInset;
+@property(nonatomic, assign) CGFloat batchOriginalIndicatorBottomInset;
 @property(nonatomic, assign) BOOL isGlobalSelectAll;
 @property(nonatomic, assign) BOOL showAllPointers;
 @property(nonatomic, assign) BOOL isProcessingAction;
@@ -237,6 +232,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 @property(nonatomic, strong)
     NSMutableDictionary *signatureRuntimeCache; 
 @property(nonatomic, strong) UIView *headerContainer;
+@property(nonatomic, copy) NSString *contextHeaderKey;
 @property(nonatomic, strong) UICollectionView *tabCollectionView; 
 @property(nonatomic, strong) NSArray<NSString *> *tabItems;       
 @property(nonatomic, strong) NSMutableArray *scriptList;
@@ -285,23 +281,28 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 - (void)setupUI {
   _bgView = [[UIView alloc] init];
   _bgView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-  _bgView.layer.cornerRadius = 12;
+  [VMUIHelper styleCard:_bgView];
   _bgView.translatesAutoresizingMaskIntoConstraints = NO;
   [self.contentView addSubview:_bgView];
 
   _lblTitle = [[UILabel alloc] init];
-  _lblTitle.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
+  _lblTitle.font = [VMUIHelper scaledFontOfSize:16 weight:UIFontWeightSemibold];
+  _lblTitle.numberOfLines = 0;
+  _lblTitle.adjustsFontForContentSizeCategory = YES;
   _lblTitle.translatesAutoresizingMaskIntoConstraints = NO;
   [_bgView addSubview:_lblTitle];
 
   _lblAuthor = [[UILabel alloc] init];
-  _lblAuthor.font = [UIFont systemFontOfSize:12];
+  _lblAuthor.font = [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightRegular];
+  _lblAuthor.numberOfLines = 0;
+  _lblAuthor.adjustsFontForContentSizeCategory = YES;
   _lblAuthor.textColor = [UIColor secondaryLabelColor];
   _lblAuthor.translatesAutoresizingMaskIntoConstraints = NO;
   [_bgView addSubview:_lblAuthor];
 
   _lblDesc = [[UILabel alloc] init];
-  _lblDesc.font = [UIFont systemFontOfSize:12];
+  _lblDesc.font = [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightRegular];
+  _lblDesc.adjustsFontForContentSizeCategory = YES;
   _lblDesc.textColor = [UIColor secondaryLabelColor];
   _lblDesc.numberOfLines = 2;
   _lblDesc.translatesAutoresizingMaskIntoConstraints = NO;
@@ -314,9 +315,10 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   [_bgView addSubview:_statusIndicator];
 
   _consoleView = [[UITextView alloc] init];
-  _consoleView.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
-  _consoleView.textColor = [UIColor systemGreenColor];
-  _consoleView.font = [UIFont fontWithName:@"Menlo" size:10];
+  _consoleView.showsHorizontalScrollIndicator = NO;
+  _consoleView.backgroundColor = [VMUIHelper canvasColor];
+  _consoleView.textColor = UIColor.secondaryLabelColor;
+  _consoleView.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
   _consoleView.editable = NO;
   _consoleView.layer.cornerRadius = 6;
   _consoleView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -360,7 +362,14 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   _spinner.translatesAutoresizingMaskIntoConstraints = NO;
   [_bgView addSubview:_spinner];
 
-  CGFloat p = 12;
+  _btnEdit.tintColor = [VMUIHelper accentColor];
+  [VMUIHelper styleButton:_btnEdit primary:NO];
+  _btnEdit.tintColor = [VMUIHelper accentColor];
+  _btnEditScript.tintColor = [VMUIHelper accentColor];
+  [VMUIHelper styleButton:_btnEditScript primary:NO];
+  _btnRun.tintColor = [VMUIHelper accentColor];
+  [VMUIHelper styleButton:_btnRun primary:YES];
+  CGFloat p = 16;
   
   _btnStackTopToConsole = [_btnStack.topAnchor constraintEqualToAnchor:_consoleView.bottomAnchor constant:12];
   _btnStackTopToDesc = [_btnStack.topAnchor constraintEqualToAnchor:_lblDesc.bottomAnchor constant:12];
@@ -368,18 +377,19 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   [NSLayoutConstraint activateConstraints:@[
     [_bgView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6],
     [_bgView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-6],
-    [_bgView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:12],
-    [_bgView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
+    [_bgView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:0],
+    [_bgView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:0],
     [_lblTitle.topAnchor constraintEqualToAnchor:_bgView.topAnchor constant:p],
     [_lblTitle.leadingAnchor constraintEqualToAnchor:_bgView.leadingAnchor constant:p],
+    [_lblTitle.trailingAnchor constraintLessThanOrEqualToAnchor:_statusIndicator.leadingAnchor constant:-12],
     [_statusIndicator.centerYAnchor constraintEqualToAnchor:_lblTitle.centerYAnchor],
     [_statusIndicator.trailingAnchor constraintEqualToAnchor:_bgView.trailingAnchor constant:-p],
     [_statusIndicator.widthAnchor constraintEqualToConstant:6],
     [_statusIndicator.heightAnchor constraintEqualToConstant:6],
-    [_lblAuthor.centerYAnchor constraintEqualToAnchor:_lblTitle.centerYAnchor],
+    [_lblAuthor.topAnchor constraintEqualToAnchor:_lblTitle.bottomAnchor constant:4],
     [_lblAuthor.trailingAnchor constraintEqualToAnchor:_statusIndicator.leadingAnchor constant:-6],
-    [_lblAuthor.leadingAnchor constraintGreaterThanOrEqualToAnchor:_lblTitle.trailingAnchor constant:10],
-    [_lblDesc.topAnchor constraintEqualToAnchor:_lblTitle.bottomAnchor constant:4],
+    [_lblAuthor.leadingAnchor constraintEqualToAnchor:_lblTitle.leadingAnchor],
+    [_lblDesc.topAnchor constraintEqualToAnchor:_lblAuthor.bottomAnchor constant:8],
     [_lblDesc.leadingAnchor constraintEqualToAnchor:_lblTitle.leadingAnchor],
     [_lblDesc.trailingAnchor constraintEqualToAnchor:_bgView.trailingAnchor constant:-p],
     [_consoleView.topAnchor constraintEqualToAnchor:_lblDesc.bottomAnchor constant:8],
@@ -389,7 +399,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     [_btnStack.leadingAnchor constraintEqualToAnchor:_bgView.leadingAnchor constant:p],
     [_btnStack.trailingAnchor constraintEqualToAnchor:_bgView.trailingAnchor constant:-p],
     [_btnStack.bottomAnchor constraintEqualToAnchor:_bgView.bottomAnchor constant:-p],
-    [_btnStack.heightAnchor constraintEqualToConstant:36],
+    [_btnStack.heightAnchor constraintGreaterThanOrEqualToConstant:44],
     [_spinner.centerXAnchor constraintEqualToAnchor:_btnRun.centerXAnchor],
     [_spinner.centerYAnchor constraintEqualToAnchor:_btnRun.centerYAnchor]
   ]];
@@ -403,7 +413,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   [UIView animateWithDuration:0.3 animations:^{
     if (running) {
       self.bgView.layer.borderWidth = 2.0;
-      self.bgView.layer.borderColor = [UIColor systemGreenColor].CGColor;
+      self.bgView.layer.borderColor = [UIColor.systemGreenColor resolvedColorWithTraitCollection:self.traitCollection].CGColor;
       self.btnRun.alpha = 0;
       self.statusIndicator.backgroundColor = [UIColor systemGreenColor];
       [self.spinner startAnimating];
@@ -414,6 +424,13 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
       [self.spinner stopAnimating];
     }
   }];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
+  if (self.isRunning && [self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+    self.bgView.layer.borderColor = [UIColor.systemGreenColor resolvedColorWithTraitCollection:self.traitCollection].CGColor;
+  }
 }
 
 - (void)setEditing:(BOOL)editing animated:(BOOL)animated {
@@ -428,9 +445,9 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
 - (void)configureWithModel:(VMScriptModel *)model log:(NSString *)log {
   _lblTitle.text = model.note ?: model.fileName;
-  _lblDesc.text = model.desc ?: @"VansonMod Script";
+  _lblDesc.text = model.desc ?: TR(@"Script_Default_Desc");
   _lblAuthor.text = [NSString stringWithFormat:@"@%@", model.author ?: @"?"];
-  _consoleView.text = log ?: @"> Ready";
+  _consoleView.text = log ?: [NSString stringWithFormat:@"> %@", TR(@"Script_Console_Ready")];
   
   _btnEditScript.hidden = NO;
   
@@ -451,9 +468,9 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     _bgView = [[UIView alloc] initWithFrame:self.contentView.bounds];
     
     _bgView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-    _bgView.layer.cornerRadius = 6;
+    _bgView.layer.cornerRadius = 12;
     _bgView.layer.shadowColor = [UIColor blackColor].CGColor;
-    _bgView.layer.shadowOpacity = 0.1;
+    _bgView.layer.shadowOpacity = 0;
     _bgView.layer.shadowOffset = CGSizeMake(0, 1);
     _bgView.layer.shadowRadius = 2;
     _bgView.autoresizingMask =
@@ -474,13 +491,15 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
 - (void)setSelected:(BOOL)selected {
   [super setSelected:selected];
-  [UIView animateWithDuration:0.2 animations:^{
-    self.bgView.hidden = !selected;
-    self.titleLabel.textColor = selected ? [UIColor labelColor] : [UIColor secondaryLabelColor];
-    self.titleLabel.font = selected ? [UIFont systemFontOfSize:13 weight:UIFontWeightBold] : [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    self.transform = selected ? CGAffineTransformIdentity : CGAffineTransformMakeScale(0.95, 0.95);
-  }];
+  self.bgView.hidden = !selected;
+  self.bgView.backgroundColor = [VMUIHelper filledColorForTint:VMUIHelper.accentColor];
+  self.titleLabel.textColor = selected ? UIColor.whiteColor : UIColor.secondaryLabelColor;
+  self.titleLabel.font = [VMUIHelper scaledFontOfSize:14 weight:selected ? UIFontWeightSemibold : UIFontWeightMedium];
+  self.isAccessibilityElement = YES;
+  self.accessibilityLabel = self.titleLabel.text;
+  self.accessibilityTraits = UIAccessibilityTraitButton | (selected ? UIAccessibilityTraitSelected : 0);
 }
+
 @end
 
 @implementation VMLockListViewController
@@ -541,8 +560,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
           NSString *valStr = TR(@"Placeholder_None");
           NSString *addrStr = TR(@"Text_Null");
           if (finalAddr > 0) {
-            VMDataType t = (chain.lockType == 0) ? VMDataTypeInt32
-                                                 : (VMDataType)chain.lockType;
+            VMDataType t = (VMDataType)chain.lockType;
             valStr = [engine readAddress:finalAddr type:t];
             addrStr = [NSString stringWithFormat:@"0x%llX", finalAddr];
           } else {
@@ -923,6 +941,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
   self.tabCollectionView = [[UICollectionView alloc] initWithFrame:CGRectZero
                                               collectionViewLayout:layout];
+  self.tabCollectionView.showsHorizontalScrollIndicator = NO;
   self.tabCollectionView.translatesAutoresizingMaskIntoConstraints = NO;
   self.tabCollectionView.backgroundColor =
       [UIColor clearColor]; 
@@ -935,19 +954,16 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   UILayoutGuide *g = self.view.safeAreaLayoutGuide;
   [NSLayoutConstraint activateConstraints:@[
     [self.headerContainer.topAnchor constraintEqualToAnchor:g.topAnchor],
-    [self.headerContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-    [self.headerContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-    [self.headerContainer.heightAnchor constraintEqualToConstant:44],
-    [self.tabCollectionView.topAnchor constraintEqualToAnchor:self.headerContainer.topAnchor constant:4],
-    [self.tabCollectionView.bottomAnchor constraintEqualToAnchor:self.headerContainer.bottomAnchor constant:-4],
+    [self.headerContainer.leadingAnchor constraintEqualToAnchor:g.leadingAnchor],
+    [self.headerContainer.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
+    [self.headerContainer.heightAnchor constraintEqualToConstant:60],
+    [self.tabCollectionView.topAnchor constraintEqualToAnchor:self.headerContainer.topAnchor constant:8],
+    [self.tabCollectionView.bottomAnchor constraintEqualToAnchor:self.headerContainer.bottomAnchor constant:-8],
     [self.tabCollectionView.leadingAnchor constraintEqualToAnchor:self.headerContainer.leadingAnchor],
     [self.tabCollectionView.trailingAnchor constraintEqualToAnchor:self.headerContainer.trailingAnchor]
   ]];
 
-  UIEdgeInsets insets = self.tableView.contentInset;
-  insets.top += (44 + 10);
-  self.tableView.contentInset = insets;
-  self.tableView.scrollIndicatorInsets = insets;
+  [self.tableView.topAnchor constraintEqualToAnchor:self.headerContainer.bottomAnchor].active = YES;
 }
 
 - (void)viewDidLoad {
@@ -958,9 +974,12 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
 
   self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
+  self.tableView.showsHorizontalScrollIndicator = NO;
   self.tableView.delegate = self;
   self.tableView.dataSource = (id<UITableViewDataSource>)self;
+  [VMUIHelper styleTableView:self.tableView];
   self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+  self.tableView.rowHeight = UITableViewAutomaticDimension;
   self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
   self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
   self.tableView.dragInteractionEnabled = YES;
@@ -974,10 +993,9 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   [self.view addSubview:self.tableView];
 
   [NSLayoutConstraint activateConstraints:@[
-    [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-    [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-    [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-    [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor]
+    [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor],
+    [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor],
+    [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor]
   ]];
 
   self.tabItems = @[
@@ -1173,8 +1191,10 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
 - (void)onDataResetNotification:(NSNotification *)noti {
   dispatch_async(dispatch_get_main_queue(), ^{
-    
-    self.isFolderMode = YES;
+    if (self.tableView.isEditing) [self exitBatchMode];
+    self.currentTab = 0;
+    self.defaultTabIndex = 0;
+    self.isFolderMode = NO;
     self.targetBundleID = nil;
     self.activeSignatures = nil;
     self.scriptList = nil;
@@ -1185,7 +1205,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     [self updateNavBar];
     [self updateFooter];
 
-    self.currentTab = 0;
+    [self.tabCollectionView reloadData];
     NSIndexPath *idx = [NSIndexPath indexPathForItem:0 inSection:0];
     [self.tabCollectionView selectItemAtIndexPath:idx animated:YES scrollPosition:UICollectionViewScrollPositionCenteredHorizontally];
   });
@@ -1193,11 +1213,20 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
 - (void)dealloc {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [self stopGCDTimer];
+  if (![objc_getAssociatedObject(self, @selector(prepareForLanguageRefresh)) boolValue])
+    [self stopGCDTimer];
+}
+
+- (void)prepareForLanguageRefresh {
+  // Language-only page replacement must leave the shared locking engine running.
+  objc_setAssociatedObject(self, @selector(prepareForLanguageRefresh), @YES,
+                           OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 - (void)viewWillAppear:(BOOL)animated {
   [super viewWillAppear:animated];
+  [self.navigationController setToolbarHidden:YES animated:NO];
+  [self setBatchToolbarVisible:self.tableView.isEditing];
 
   NSString *engineBid = [VMMemoryEngine shared].currentBundleID;
 
@@ -1246,6 +1275,12 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   [self updateFooter];
 }
 
+- (void)viewWillDisappear:(BOOL)animated {
+  [super viewWillDisappear:animated];
+  if (self.tableView.isEditing) [self exitBatchMode];
+  [self.navigationController setToolbarHidden:YES animated:animated];
+}
+
 - (void)viewDidAppear:(BOOL)animated {
   [super viewDidAppear:animated];
   
@@ -1255,22 +1290,13 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 }
 
 - (void)updateNavBar {
+  self.valueSnapshotButton = nil;
   NSMutableArray *rightBtns = [NSMutableArray array];
   self.navigationItem.leftBarButtonItem = nil;
   self.navigationItem.leftBarButtonItems = nil; 
 
-  NSString *currentTitle = @"";
-  if (!self.isFolderMode && self.targetBundleID) {
-    
-    NSString *name = self.folderMetadata[self.targetBundleID][@"name"];
-    currentTitle = name ?: self.targetBundleID;
-  } else {
-    
-    if (self.currentTab < self.tabItems.count) {
-      currentTitle = self.tabItems[self.currentTab];
-    }
-  }
-  self.navigationItem.title = currentTitle;
+  self.navigationItem.title = self.currentTab < self.tabItems.count ? self.tabItems[self.currentTab] : TR(@"Tab_Toolbox");
+  [self updateContextHeader];
 
   if (_currentTab == 0) {
     UIBarButtonItem *add = [[UIBarButtonItem alloc]
@@ -1300,10 +1326,12 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
   if (_currentTab == 0 || _currentTab == 1) {
     UIBarButtonItem *snapshot = [[UIBarButtonItem alloc]
-        initWithImage:[UIImage systemImageNamed:@"camera"]
+        initWithTitle:TR(@"Snapshot_Button")
                 style:UIBarButtonItemStylePlain
                target:self
                action:@selector(showValueSnapshotMenu)];
+    self.valueSnapshotButton = snapshot;
+    [self updateValueSnapshotButton];
     [rightBtns addObject:snapshot];
   }
   
@@ -1350,6 +1378,11 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   }
 
   self.navigationItem.rightBarButtonItems = rightBtns;
+  UIBarButtonItem *select = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle"]
+      style:UIBarButtonItemStylePlain target:self action:@selector(enterBatchMode)];
+  select.accessibilityLabel = TR(@"Btn_Batch_Select");
+  UIBarButtonItem *back = self.navigationItem.leftBarButtonItem;
+  self.navigationItem.leftBarButtonItems = back ? @[back, select] : @[select];
 }
 
 - (void)backToFolderList {
@@ -1373,90 +1406,56 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Err_Not_Connected") message:TR(@"Err_Not_Connected_Msg") preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Go_Connect") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-      if (self.tabBarController) self.tabBarController.selectedIndex = 0;
+      for (UIViewController *page in self.tabBarController.viewControllers) {
+        if (page.tabBarItem.tag == 0) { self.tabBarController.selectedViewController = page; break; }
+      }
     }]];
 
     [self presentViewController:alert animated:YES completion:nil];
     return;
   }
 
-  UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Script_New_Title") message:nil preferredStyle:UIAlertControllerStyleAlert];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = TR(@"Script_Name_Placeholder");
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 60, 30)];
-    l.text = TR(@"Lab_Note_Colon");
-    l.font = [UIFont systemFontOfSize:12];
-    l.textColor = [UIColor systemGrayColor];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.text = TR(@"Placeholder_Author_Default");
-    tf.placeholder = TR(@"Placeholder_Author");
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 60, 30)];
-    l.text = TR(@"Lab_Auth_Colon");
-    l.font = [UIFont systemFontOfSize:12];
-    l.textColor = [UIColor systemGrayColor];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-    NSString *name = alert.textFields[0].text;
-    NSString *author = alert.textFields[1].text;
-    if (name.length == 0) name = TR(@"Script_Default_Name");
-    if (author.length == 0) author = TR(@"Placeholder_Author_Default");
-
-    VMScriptModel *model = [[VMScriptModel alloc] init];
-                        model.note = name;
-                        model.author = author;
-                        model.bundleID = currentBid; 
-
-                        model.scriptContent = @"";
-
-                        model.createdAt = [[NSDate date] timeIntervalSince1970];
-                        model.isImported = NO; 
-
-                        if (currentBid.length > 0) {
-                          model.fileName = [NSString stringWithFormat:@"%@-script.vmsc", currentBid];
-                        } else {
-                          model.fileName = @"script.vmsc";
-                        }
-                        
-                        NSString *dir = [[self getDirectoryForCurrentTab] stringByAppendingPathComponent:currentBid];
-                        NSString *testPath = [dir stringByAppendingPathComponent:model.fileName];
-                        int counter = 1;
-                        while ([[NSFileManager defaultManager] fileExistsAtPath:testPath]) {
-                          if (currentBid.length > 0) {
-                            model.fileName = [NSString stringWithFormat:@"%@-script-%d.vmsc", currentBid, counter];
-                          } else {
-                            model.fileName = [NSString stringWithFormat:@"script-%d.vmsc", counter];
-                          }
-                          testPath = [dir stringByAppendingPathComponent:model.fileName];
-                          counter++;
-                        }
-
-                        [self saveScriptModel:model];
-
-                        [self reloadFolderDataOrFileData];
-                        [self.tableView reloadData];
-
-                        [self openScriptEditor:model];
-                      }]];
-  [self presentViewController:alert animated:YES completion:nil];
+  VMFormSheetViewController *form = [[VMFormSheetViewController alloc] initWithTitle:TR(@"Script_New_Title") submitTitle:TR(@"Btn_Save")];
+  UITextField *name = [form addTextFieldWithLabel:TR(@"Script_Name_Label") value:nil placeholder:TR(@"Script_Name_Placeholder") keyboardType:UIKeyboardTypeDefault];
+  UITextField *author = [form addTextFieldWithLabel:TR(@"Label_Author") value:TR(@"Placeholder_Author_Default") placeholder:TR(@"Placeholder_Author") keyboardType:UIKeyboardTypeDefault];
+  __block VMScriptModel *created = nil;
+  __weak __typeof(self) weakSelf = self;
+  form.submitHandler = ^NSString *(VMFormSheetViewController *editor) {
+    __typeof(self) strongSelf = weakSelf;
+    if (!strongSelf) return TR(@"Err_Write_Permission");
+    VMScriptModel *model = [VMScriptModel new];
+    model.note = name.text.length ? name.text : TR(@"Script_Default_Name");
+    model.author = author.text.length ? author.text : TR(@"Placeholder_Author_Default");
+    model.bundleID = currentBid;
+    model.scriptContent = @"";
+    model.createdAt = NSDate.date.timeIntervalSince1970;
+    model.isImported = NO;
+    NSString *dir = [[strongSelf getDirectoryForCurrentTab] stringByAppendingPathComponent:currentBid];
+    model.fileName = [NSString stringWithFormat:@"%@-script.vmsc", currentBid];
+    NSUInteger counter = 1;
+    while ([[NSFileManager defaultManager] fileExistsAtPath:[dir stringByAppendingPathComponent:model.fileName]])
+      model.fileName = [NSString stringWithFormat:@"%@-script-%lu.vmsc", currentBid, (unsigned long)counter++];
+    if (![strongSelf saveScriptModel:model]) return TR(@"Err_Write_Permission");
+    created = model;
+    return nil;
+  };
+  form.didSubmit = ^{
+    [weakSelf reloadFolderDataOrFileData];
+    [weakSelf.tableView reloadData];
+    [weakSelf updateFooter];
+    if (created) [weakSelf openScriptEditor:created];
+  };
+  [form presentFrom:self];
 }
 
-- (void)saveScriptModel:(VMScriptModel *)model {
+- (BOOL)saveScriptModel:(VMScriptModel *)model {
   NSString *dir = [[self getDirectoryForCurrentTab] stringByAppendingPathComponent:model.bundleID];
   if (![[NSFileManager defaultManager] fileExistsAtPath:dir]) {
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil]) return NO;
   }
   NSString *path = [dir stringByAppendingPathComponent:model.fileName];
   VMDataSession *s = [VMDataSession sessionWithData:@[model] bundleID:model.bundleID dataType:@"script"];
-  [[s toJSONData] writeToFile:path atomically:YES];
+  return [[s toJSONData] writeToFile:path atomically:YES];
 }
 
 - (void)openScriptEditor:(VMScriptModel *)model {
@@ -1804,81 +1803,56 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   return displayList;
 }
 
-- (void)updateFooter {
-  NSInteger count = [self currentDisplayData].count;
+- (void)updateContextHeader {
+  VMMemoryEngine *engine = [VMMemoryEngine shared];
+  NSString *bundleID = self.currentTab >= 2 && !self.isFolderMode ? self.targetBundleID : engine.currentBundleID;
+  pid_t pid = bundleID.length && [bundleID isEqualToString:engine.currentBundleID] && engine.targetTask != MACH_PORT_NULL ? engine.targetPid : 0;
+  NSString *name = bundleID.length ? ([self.folderMetadata[bundleID][@"name"] length] ? self.folderMetadata[bundleID][@"name"] : [self getAppNameForBundleID:bundleID]) : @"";
+  if ([bundleID isEqualToString:engine.currentBundleID] && engine.currentProcessName.length)
+    name = engine.currentProcessName;
+  NSString *key = [NSString stringWithFormat:@"%@|%@|%d", bundleID ?: @"", name, pid];
+  if ([key isEqualToString:self.contextHeaderKey]) return;
+  self.contextHeaderKey = key;
+  if (bundleID.length) {
+    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.tableView.bounds.size.width, 48)];
+    UIView *process = [VMUIHelper processHeaderWithName:name bundleID:bundleID pid:pid];
+    process.translatesAutoresizingMaskIntoConstraints = NO;
+    [container addSubview:process];
+    [NSLayoutConstraint activateConstraints:@[
+      [process.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:16],
+      [process.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-16],
+      [process.topAnchor constraintEqualToAnchor:container.topAnchor],
+      [process.bottomAnchor constraintEqualToAnchor:container.bottomAnchor]
+    ]];
+    self.tableView.tableHeaderView = container;
+  } else {
+    self.tableView.tableHeaderView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, CGFLOAT_MIN)];
+  }
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
+}
 
-  if (self.isFolderMode && self.currentTab >= 2 && self.currentTab <= 5) {
-    if (self.folderList.count == 0) {
-      UILabel *lbl = [[UILabel alloc] initWithFrame:self.tableView.bounds];
-      NSString *emptyText = @"";
-      switch (self.currentTab) {
-      case 2:
-        emptyText = TR(@"Lock_No_Ptr"); 
-        break;
-      case 3:
-        emptyText = TR(@"No_RVA_Patches"); 
-        break;
-      case 4:
-        emptyText = TR(@"No_Signatures"); 
-        break;
-      case 5:
-        emptyText = TR(@"No_Verifier_Files"); 
-        break;
-      case 6:
-        emptyText = TR(@"No_Script_Items"); 
-        break;
-      default:
-        emptyText = TR(@"Lock_Empty");
-        break;
-      }
-      lbl.text = emptyText;
-      lbl.textAlignment = NSTextAlignmentCenter;
-      lbl.textColor = [UIColor systemGrayColor];
-      self.tableView.backgroundView = lbl;
-    } else {
-      
-      self.tableView.backgroundView = nil;
-    }
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
+  if ([self.tabBarController isKindOfClass:VMRootViewController.class])
+    [(VMRootViewController *)self.tabBarController refreshBrandingOverlay];
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 8; }
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section { return CGFLOAT_MIN; }
+
+- (void)updateFooter {
+  [self updateContextHeader];
+  [self updateValueSnapshotButton];
+  NSUInteger count = self.isFolderMode && self.currentTab >= 2 ? self.folderList.count : [self currentDisplayData].count;
+  if (count > 0) {
+    self.tableView.backgroundView = nil;
     return;
   }
-
-  if (count == 0) {
-    UILabel *lbl = [[UILabel alloc] initWithFrame:self.tableView.bounds];
-    NSString *emptyText = @"";
-    switch (self.currentTab) {
-    case 0:
-      emptyText = TR(@"Lock_Empty"); 
-      break;
-    case 1:
-      emptyText = TR(@"Fav_Empty"); 
-      break;
-    case 2:
-      emptyText = TR(@"No_Pointer_Items"); 
-      break;
-    case 3:
-      emptyText = TR(@"No_RVA_Items"); 
-      break;
-    case 4:
-      emptyText = TR(@"No_Signature_Items"); 
-      break;
-    case 5:
-      emptyText = TR(@"No_Verifier_Items"); 
-      break;
-    case 6:
-      emptyText = TR(@"No_Script_Items"); 
-      break;
-    default:
-      emptyText = TR(@"Lock_Empty");
-      break;
-    }
-    lbl.text = emptyText;
-    lbl.textAlignment = NSTextAlignmentCenter;
-    lbl.textColor = [UIColor systemGrayColor];
-    self.tableView.backgroundView = lbl;
-  } else {
-    
-    self.tableView.backgroundView = nil;
-  }
+  NSArray *keys = @[@"Lock_Empty", @"Fav_Empty", @"No_Pointer_Items", @"No_RVA_Items", @"No_Signature_Items", @"No_Verifier_Items", @"No_Script_Items"];
+  NSArray *icons = @[@"lock", @"star", @"point.topleft.down.curvedto.point.bottomright.up", @"cpu", @"waveform.path", @"checkmark.shield", @"curlybraces"];
+  NSInteger index = MIN(MAX(self.currentTab, 0), (NSInteger)keys.count - 1);
+  self.tableView.backgroundView = [VMUIHelper emptyStateWithTitle:self.tabItems[index] message:TR(keys[index]) symbol:icons[index]];
 }
 
 - (void)startGCDTimer {
@@ -1901,6 +1875,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
       [self reloadFolderData];
       [self.tableView reloadData];
     }
+    [self updateFooter];
   });
 }
 
@@ -1939,7 +1914,13 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     cell.detailTextLabel.text =
         [NSString stringWithFormat:@"%@ (%lu)", bid, (unsigned long)count];
     cell.imageView.image = [UIImage systemImageNamed:@"folder.fill"];
-    cell.imageView.tintColor = [UIColor systemBlueColor];
+    cell.imageView.tintColor = [VMUIHelper accentColor];
+    cell.textLabel.font = [VMUIHelper scaledFontOfSize:17 weight:UIFontWeightSemibold];
+    cell.textLabel.numberOfLines = 0;
+    cell.textLabel.adjustsFontForContentSizeCategory = YES;
+    cell.detailTextLabel.font = [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightRegular];
+    cell.detailTextLabel.numberOfLines = 0;
+    cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
     cell.selectionStyle = tableView.isEditing
                               ? UITableViewCellSelectionStyleDefault
                               : UITableViewCellSelectionStyleNone;
@@ -2013,8 +1994,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
       uint64_t finalAddr = [self forceResolveChain:chain];
       if (finalAddr > 0) {
         addrStr = [NSString stringWithFormat:@"0x%llX", finalAddr];
-        VMDataType t = (chain.lockType == 0) ? VMDataTypeInt32
-                                             : (VMDataType)chain.lockType;
+        VMDataType t = (VMDataType)chain.lockType;
         valStr = [[VMMemoryEngine shared] readAddress:finalAddr type:t];
       } else {
         addrStr = TR(@"Text_Null");
@@ -2024,7 +2004,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     }
 
     VMDataType type =
-        (chain.lockType == 0) ? VMDataTypeInt32 : (VMDataType)chain.lockType;
+        (VMDataType)chain.lockType;
     NSString *typeStr = [self typeNameForType:type];
     [cell configureWithChain:chain address:addrStr val:valStr type:typeStr];
 
@@ -2325,8 +2305,10 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
 - (void)tableView:(UITableView *)tableView
     didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-  if (tableView.isEditing)
+  if (tableView.isEditing) {
+    [self updateSelectionTitle];
     return;
+  }
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
   if (_currentTab >= 2 && self.isFolderMode) {
@@ -2473,16 +2455,13 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-  if (self.currentTab == 0 || self.currentTab == 1) {
-    return 70;
-  }
   return UITableViewAutomaticDimension;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView
     estimatedHeightForRowAtIndexPath:(NSIndexPath *)indexPath {
   if (self.currentTab == 0 || self.currentTab == 1)
-    return 70;
+    return 118;
   if (self.currentTab == 2 || self.currentTab == 3 || self.currentTab == 4)
     return 160;
   return 100;
@@ -2697,53 +2676,49 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 }
 
 - (void)addLock {
-  UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Lock_Add_Manual_Title") message:nil preferredStyle:UIAlertControllerStyleAlert];
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = TR(@"Placeholder_Addr_Hex");
-    tf.keyboardType = UIKeyboardTypeASCIICapable;
-    tf.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
-  }];
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = TR(@"Lock_Input_Val_Hint");
-    tf.keyboardType = UIKeyboardTypeDecimalPad;
-  }];
-  UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"), TR(@"Type_F32")]];
-  seg.selectedSegmentIndex = 2;
-  UIViewController *contentVC = [[UIViewController alloc] init];
-  contentVC.preferredContentSize = CGSizeMake(270, 40);
-  contentVC.view.backgroundColor = [UIColor clearColor];
-  seg.frame = CGRectMake(0, 5, 270, 30);
-  [contentVC.view addSubview:seg];
-  [alert setValue:contentVC forKey:@"contentViewController"];
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-    NSString *addrStr = [alert.textFields[0].text stringByReplacingOccurrencesOfString:@"0x" withString:@""];
-    NSString *valStr = alert.textFields[1].text;
-    if (addrStr.length == 0 || valStr.length == 0) return;
-    uint64_t addr = strtoull([addrStr UTF8String], NULL, 16);
-    if (addr == 0) return;
-    VMDataType type = VMDataTypeInt32;
-    switch (seg.selectedSegmentIndex) {
-      case 0: type = VMDataTypeInt8; break;
-      case 1: type = VMDataTypeInt16; break;
-      case 2: type = VMDataTypeInt32; break;
-      case 3: type = VMDataTypeInt64; break;
-      case 4: type = VMDataTypeFloat; break;
+  VMFormSheetViewController *form = [[VMFormSheetViewController alloc] initWithTitle:TR(@"Lock_Add_Manual_Title") submitTitle:TR(@"Btn_Save")];
+  UITextField *address = [form addTextFieldWithLabel:TR(@"Placeholder_Addr_Hex") value:nil placeholder:TR(@"Placeholder_Addr_Hex") keyboardType:UIKeyboardTypeASCIICapable];
+  UITextField *value = [form addTextFieldWithLabel:TR(@"Lab_Value_Colon") value:nil placeholder:TR(@"Lock_Input_Val_Hint") keyboardType:UIKeyboardTypeNumbersAndPunctuation];
+  [form addSectionWithTitle:TR(@"Lock_Select_Type_Title")];
+  UISegmentedControl *types = [[UISegmentedControl alloc] initWithItems:@[@"I8", @"I16", @"I32", @"I64", @"F32"]];
+  types.selectedSegmentIndex = 2;
+  [types.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+  [form addView:types];
+  form.submitHandler = ^NSString *(VMFormSheetViewController *editor) {
+    uint64_t addr = 0;
+    if (![VMStringMemorySession parseAddress:address.text value:&addr] || addr == 0) return TR(@"Err_Invalid_Base_Ptr");
+    NSString *val = [value.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!val.length) return TR(@"Err_Target_Empty");
+    NSScanner *scanner = [NSScanner scannerWithString:val];
+    scanner.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    double number = 0;
+    if (![scanner scanDouble:&number] || !scanner.isAtEnd || !isfinite(number)) return TR(@"Set_Invalid_Value");
+    static const VMDataType map[] = {VMDataTypeInt8, VMDataTypeInt16, VMDataTypeInt32, VMDataTypeInt64, VMDataTypeFloat};
+    NSInteger selection = types.selectedSegmentIndex;
+    VMDataType type = selection >= 0 && selection < 5 ? map[selection] : VMDataTypeInt32;
+    if (type == VMDataTypeFloat) {
+      if (!isfinite((float)number)) return TR(@"Set_Invalid_Value");
+    } else {
+      const char *input = val.UTF8String;
+      NSUInteger byteCount = [val lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+      if (!input) return TR(@"Set_Invalid_Value");
+      char *end = NULL;
+      errno = 0;
+      long long integer = strtoll(input, &end, 10);
+      if (errno == ERANGE || end == input || (NSUInteger)(end - input) != byteCount)
+        return TR(@"Set_Invalid_Value");
+      if ((type == VMDataTypeInt8 && (integer < INT8_MIN || integer > INT8_MAX)) ||
+          (type == VMDataTypeInt16 && (integer < INT16_MIN || integer > INT16_MAX)) ||
+          (type == VMDataTypeInt32 && (integer < INT32_MIN || integer > INT32_MAX))) return TR(@"Set_Invalid_Value");
     }
-    NSMutableDictionary *item = [NSMutableDictionary dictionaryWithDictionary:@{
-      @"addr" : @(addr),
-      @"val" : valStr,
-      @"type" : @(type),
-      @"enabled" : @(NO)
-    }];
-    if (![VMMemoryEngine shared].lockedItems) {
-      [VMMemoryEngine shared].lockedItems = [NSMutableArray array];
-    }
-    [[VMMemoryEngine shared].lockedItems addObject:item];
-    [self.tableView reloadData];
-    [self updateFooter];
-  }]];
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
-  [self presentViewController:alert animated:YES completion:nil];
+    VMMemoryEngine *engine = [VMMemoryEngine shared];
+    if (!engine.lockedItems) engine.lockedItems = [NSMutableArray array];
+    [engine.lockedItems addObject:[@{@"addr":@(addr), @"val":val, @"type":@(type), @"enabled":@NO} mutableCopy]];
+    return nil;
+  };
+  __weak __typeof(self) weakSelf = self;
+  form.didSubmit = ^{ [weakSelf.tableView reloadData]; [weakSelf updateFooter]; };
+  [form presentFrom:self];
 }
 
 - (void)importPointers {
@@ -2807,21 +2782,19 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 }
 
 - (void)addFavoriteManual {
-  UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Fav_Add_Title") message:nil preferredStyle:UIAlertControllerStyleAlert];
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = TR(@"Placeholder_Addr_Hex");
-  }];
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-    NSString *addrStr = [alert.textFields[0].text stringByReplacingOccurrencesOfString:@"0x" withString:@""];
-    uint64_t addr = strtoull([addrStr UTF8String], NULL, 16);
-    if (addr > 0) {
-      NSMutableDictionary *fav = [NSMutableDictionary dictionaryWithDictionary:@{@"addr" : @(addr), @"type" : @(2)}];
-      [[VMMemoryEngine shared].favoriteItems addObject:fav];
-      [self.tableView reloadData];
-    }
-  }]];
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
-  [self presentViewController:alert animated:YES completion:nil];
+  VMFormSheetViewController *form = [[VMFormSheetViewController alloc] initWithTitle:TR(@"Fav_Add_Title") submitTitle:TR(@"Btn_Save")];
+  UITextField *address = [form addTextFieldWithLabel:TR(@"Placeholder_Addr_Hex") value:nil placeholder:TR(@"Placeholder_Addr_Hex") keyboardType:UIKeyboardTypeASCIICapable];
+  form.submitHandler = ^NSString *(VMFormSheetViewController *editor) {
+    uint64_t addr = 0;
+    if (![VMStringMemorySession parseAddress:address.text value:&addr] || addr == 0) return TR(@"Err_Invalid_Base_Ptr");
+    VMMemoryEngine *engine = [VMMemoryEngine shared];
+    if (!engine.favoriteItems) engine.favoriteItems = [NSMutableArray array];
+    [engine.favoriteItems addObject:[@{@"addr":@(addr), @"type":@(VMDataTypeInt32)} mutableCopy]];
+    return nil;
+  };
+  __weak __typeof(self) weakSelf = self;
+  form.didSubmit = ^{ [weakSelf.tableView reloadData]; [weakSelf updateFooter]; };
+  [form presentFrom:self];
 }
 
 - (void)showEditNoteAlertForDict:(NSMutableDictionary *)item {
@@ -2851,75 +2824,114 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   self.tableView.allowsMultipleSelectionDuringEditing = YES;
   [self.tableView setEditing:YES animated:YES];
   [self.tableView reloadData];
+  self.navigationItem.leftBarButtonItems = nil;
+  self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:TR(@"Batch_Sel_All")
+      style:UIBarButtonItemStylePlain target:self action:@selector(toggleSelectAll)];
+  self.navigationItem.rightBarButtonItems = nil;
+  self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:TR(@"Btn_Cancel")
+      style:UIBarButtonItemStylePlain target:self action:@selector(exitBatchMode)];
+  NSMutableArray *items = [NSMutableArray array];
+  NSArray *icons = @[@"square.and.arrow.up", @"doc.on.doc", @"pencil", @"trash"];
+  NSArray *titles = @[TR(@"Act_Export"), TR(@"Pop_Copy_Addr"), TR(@"Batch_Mod_Sel"), TR(@"Act_Delete")];
+  NSArray *selectors = @[NSStringFromSelector(@selector(performBatchShare)), NSStringFromSelector(@selector(performBatchCopy)),
+      NSStringFromSelector(@selector(performBatchModify)), NSStringFromSelector(@selector(performBatchDelete))];
+  for (NSUInteger index = 0; index < icons.count; index++) {
+    if (index == 1 && (self.isFolderMode || self.currentTab > 2)) continue;
+    if (index == 2 && self.currentTab > 1) continue;
+    if (items.count) [items addObject:[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil]];
+    UIBarButtonItem *item = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:icons[index]]
+        style:UIBarButtonItemStylePlain target:self action:NSSelectorFromString(selectors[index])];
+    item.accessibilityLabel = titles[index];
+    item.tintColor = index == 3 ? UIColor.systemRedColor : [VMUIHelper accentColor];
+    if (@available(iOS 26.0, *)) item.hidesSharedBackground = YES;
+    [items addObject:item];
+  }
+  self.toolbarItems = items;
+  [self.navigationController setToolbarHidden:YES animated:NO];
+  [self setBatchToolbarVisible:YES];
+  self.batchToolbar.items = items;
+  [self updateSelectionTitle];
+}
 
-  self.navigationItem.leftBarButtonItem =
-      [[UIBarButtonItem alloc] initWithTitle:TR(@"Batch_Sel_All")
-                                       style:UIBarButtonItemStylePlain
-                                      target:self
-                                      action:@selector(toggleSelectAll)];
-  self.navigationItem.rightBarButtonItem =
-      [[UIBarButtonItem alloc] initWithTitle:TR(@"Btn_Cancel")
-                                       style:UIBarButtonItemStyleDone
-                                      target:self
-                                      action:@selector(exitBatchMode)];
-
-  BOOL showCopy =
-      (self.currentTab == 0 || self.currentTab == 1 || self.currentTab == 2);
-  BOOL showEdit = (self.currentTab == 0 || self.currentTab == 1);
-
-  CGFloat btnW = 50;
-  CGFloat h = 40;
-  CGFloat spacing = 5;
-
-  int btnCount = 2; 
-  if (showCopy)
-    btnCount++;
-  if (showEdit)
-    btnCount++;
-
-  CGFloat totalWidth = (btnW * btnCount) + (spacing * (btnCount - 1));
-  UIView *titleView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, totalWidth, 44)];
-  CGFloat currentX = 0;
-
-  UIButton *shareBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-  [shareBtn setImage:[UIImage systemImageNamed:@"square.and.arrow.up"] forState:UIControlStateNormal];
-  shareBtn.frame = CGRectMake(currentX, 2, btnW, h);
-  shareBtn.tintColor = [UIColor systemBlueColor];
-  [shareBtn addTarget:self action:@selector(performBatchShare) forControlEvents:UIControlEventTouchUpInside];
-  [titleView addSubview:shareBtn];
-  currentX += (btnW + spacing);
-
-  if (showCopy) {
-    UIButton *copyBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [copyBtn setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
-    copyBtn.frame = CGRectMake(currentX, 2, btnW, h);
-    copyBtn.tintColor = [UIColor systemYellowColor];
-    [copyBtn addTarget:self action:@selector(performBatchCopy) forControlEvents:UIControlEventTouchUpInside];
-    [titleView addSubview:copyBtn];
-    currentX += (btnW + spacing);
+- (void)setBatchToolbarVisible:(BOOL)visible {
+  if (visible && !self.batchToolbar) {
+    self.batchToolbar = [UIToolbar new];
+    self.batchToolbar.translatesAutoresizingMaskIntoConstraints = NO;
+    self.batchToolbar.tintColor = [VMUIHelper accentColor];
+    self.batchToolbar.backgroundColor = [VMUIHelper cardColor];
+    self.batchToolbar.layer.cornerRadius = 16;
+    self.batchToolbar.clipsToBounds = YES;
+    UIToolbarAppearance *appearance = [UIToolbarAppearance new];
+    [appearance configureWithOpaqueBackground];
+    appearance.backgroundColor = [VMUIHelper cardColor];
+    appearance.shadowColor = UIColor.clearColor;
+    appearance.buttonAppearance.normal.titleTextAttributes = @{
+      NSForegroundColorAttributeName: [VMUIHelper accentColor]
+    };
+    appearance.buttonAppearance.highlighted.titleTextAttributes =
+        appearance.buttonAppearance.normal.titleTextAttributes;
+    appearance.buttonAppearance.disabled.titleTextAttributes = @{
+      NSForegroundColorAttributeName: UIColor.secondaryLabelColor
+    };
+    self.batchToolbar.standardAppearance = appearance;
+    self.batchToolbar.compactAppearance = appearance;
+    if (@available(iOS 15.0, *)) {
+      self.batchToolbar.scrollEdgeAppearance = appearance;
+      self.batchToolbar.compactScrollEdgeAppearance = appearance;
+    }
+    [self.view addSubview:self.batchToolbar];
+    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+      [self.batchToolbar.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12],
+      [self.batchToolbar.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
+      [self.batchToolbar.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
+      [self.batchToolbar.heightAnchor constraintEqualToConstant:52]
+    ]];
   }
 
-  if (showEdit) {
-    UIButton *modBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [modBtn setImage:[UIImage systemImageNamed:@"pencil"] forState:UIControlStateNormal];
-    modBtn.frame = CGRectMake(currentX, 2, btnW, h);
-    modBtn.tintColor = [UIColor systemPurpleColor];
-    [modBtn addTarget:self action:@selector(performBatchModify) forControlEvents:UIControlEventTouchUpInside];
-    [titleView addSubview:modBtn];
-    currentX += (btnW + spacing);
+  if (visible != self.batchToolbarShown) {
+    UIEdgeInsets contentInset = self.tableView.contentInset;
+    UIEdgeInsets indicatorInset = self.tableView.verticalScrollIndicatorInsets;
+    if (visible) {
+      self.batchOriginalContentBottomInset = contentInset.bottom;
+      self.batchOriginalIndicatorBottomInset = indicatorInset.bottom;
+    }
+    contentInset.bottom = self.batchOriginalContentBottomInset + (visible ? 68 : 0);
+    indicatorInset.bottom = self.batchOriginalIndicatorBottomInset + (visible ? 68 : 0);
+    self.tableView.contentInset = contentInset;
+    self.tableView.verticalScrollIndicatorInsets = indicatorInset;
+    self.batchToolbarShown = visible;
   }
+  self.batchToolbar.hidden = !visible;
+  if (visible) [self.view bringSubviewToFront:self.batchToolbar];
+  if ([self.tabBarController isKindOfClass:VMRootViewController.class])
+    [(VMRootViewController *)self.tabBarController refreshBrandingOverlay];
+}
 
-  UIButton *delBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-  [delBtn setImage:[UIImage systemImageNamed:@"trash"] forState:UIControlStateNormal];
-  delBtn.frame = CGRectMake(currentX, 2, btnW, h);
-  delBtn.tintColor = [UIColor systemRedColor];
-  [delBtn addTarget:self action:@selector(performBatchDelete) forControlEvents:UIControlEventTouchUpInside];
-  [titleView addSubview:delBtn];
+- (void)updateSelectionTitle {
+  if (!self.tableView.isEditing) return;
+  NSUInteger selectedCount = self.tableView.indexPathsForSelectedRows.count;
+  self.isGlobalSelectAll = selectedCount > 0 && selectedCount == [self.tableView numberOfRowsInSection:0];
+  self.navigationItem.leftBarButtonItem.title = self.isGlobalSelectAll ? TR(@"Btn_Deselect_All") : TR(@"Batch_Sel_All");
+  self.navigationItem.title = [NSString stringWithFormat:@"%@ · %lu", TR(@"Btn_Batch_Select"),
+      (unsigned long)selectedCount];
+  for (UIBarButtonItem *item in self.toolbarItems) {
+    if (item.action) {
+      item.enabled = selectedCount > 0;
+      item.tintColor = item.enabled
+          ? (item.action == @selector(performBatchDelete) ? UIColor.systemRedColor : [VMUIHelper accentColor])
+          : UIColor.secondaryLabelColor;
+    }
+  }
+}
 
-  self.navigationItem.titleView = titleView;
+- (void)tableView:(UITableView *)tableView didDeselectRowAtIndexPath:(NSIndexPath *)indexPath {
+  [self updateSelectionTitle];
 }
 
 - (void)exitBatchMode {
+  [self.navigationController setToolbarHidden:YES animated:NO];
+  [self setBatchToolbarVisible:NO];
   [self.tableView setEditing:NO animated:YES];
   self.navigationItem.titleView = nil;
   [self updateNavBar];
@@ -2939,12 +2951,18 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
       [self.tableView deselectRowAtIndexPath:ip animated:NO];
     }
   }
+  [self updateSelectionTitle];
 }
 
 - (void)performBatchShare {
   NSArray *selectedPaths = [self.tableView indexPathsForSelectedRows];
   if (selectedPaths.count == 0) {
     [self showToast:TR(@"Msg_No_Sel")];
+    return;
+  }
+
+  if (self.currentTab == 0 || self.currentTab == 1) {
+    [self exportSelectedAsBackup:selectedPaths];
     return;
   }
 
@@ -3175,6 +3193,21 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 }
 
 - (void)performBatchDelete {
+  NSUInteger count = self.tableView.indexPathsForSelectedRows.count;
+  if (count == 0) {
+    [self showToast:TR(@"Msg_No_Sel")];
+    return;
+  }
+  NSString *message = [NSString stringWithFormat:@"%@ · %lu", self.tabItems[self.currentTab], (unsigned long)count];
+  UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Act_Delete") message:message preferredStyle:UIAlertControllerStyleAlert];
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Act_Delete") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [self executeBatchDelete];
+  }]];
+  [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)executeBatchDelete {
   NSArray *selectedPaths = [self.tableView indexPathsForSelectedRows];
   if (!selectedPaths || selectedPaths.count == 0) {
     [self showToast:TR(@"Msg_No_Sel")];
@@ -3602,28 +3635,39 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 }
 
 - (void)showEditTypeAlert:(VMPointerChain *)chain {
-  UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Lock_Select_Type_Title") message:nil preferredStyle:UIAlertControllerStyleAlert];
-  UIViewController *contentVC = [[UIViewController alloc] init];
-  contentVC.preferredContentSize = CGSizeMake(270, 100);
-  contentVC.view.backgroundColor = [UIColor clearColor];
-  NSArray *items = @[TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"), TR(@"Type_F32"), TR(@"Type_F64")];
+  VMFormSheetViewController *form = [[VMFormSheetViewController alloc] initWithTitle:TR(@"Lock_Select_Type_Title") submitTitle:TR(@"Btn_Save")];
+  NSArray *items = @[@"I8", @"I16", @"I32", @"I64", @"U8", @"U16", @"U32", @"U64", @"F32", @"F64", @"Str"];
   UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:items];
-  seg.frame = CGRectMake(0, 10, 270, 30);
-  NSInteger currentIdx = chain.lockType;
-  if (currentIdx > 5) currentIdx = 2;
-  seg.selectedSegmentIndex = currentIdx;
-  [contentVC.view addSubview:seg];
-  [alert setValue:contentVC forKey:@"contentViewController"];
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+  seg.translatesAutoresizingMaskIntoConstraints = NO;
+  NSInteger current = chain.lockType;
+  seg.selectedSegmentIndex = current >= VMDataTypeInt8 && current <= VMDataTypeString ? current : VMDataTypeInt32;
+  seg.accessibilityLabel = TR(@"Lock_Select_Type_Title");
+  UIScrollView *types = [UIScrollView new];
+  types.showsHorizontalScrollIndicator = NO;
+  [types addSubview:seg];
+  [NSLayoutConstraint activateConstraints:@[
+    [types.heightAnchor constraintEqualToConstant:44],
+    [seg.topAnchor constraintEqualToAnchor:types.contentLayoutGuide.topAnchor],
+    [seg.bottomAnchor constraintEqualToAnchor:types.contentLayoutGuide.bottomAnchor],
+    [seg.leadingAnchor constraintEqualToAnchor:types.contentLayoutGuide.leadingAnchor],
+    [seg.trailingAnchor constraintEqualToAnchor:types.contentLayoutGuide.trailingAnchor],
+    [seg.heightAnchor constraintEqualToAnchor:types.frameLayoutGuide.heightAnchor],
+    [seg.widthAnchor constraintEqualToConstant:616]
+  ]];
+  [form addView:types];
+  form.submitHandler = ^NSString *(VMFormSheetViewController *editor) {
     chain.lockType = seg.selectedSegmentIndex;
-    NSString *bid = chain.bundleID ?: [[VMMemoryEngine shared] currentBundleID];
-    if (bid) {
-      [[VMLockManager shared] saveLocks:[VMMemoryEngine shared].activeLockedPointers forApp:bid];
-    }
-    [self.tableView reloadData];
-  }]];
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
-  [self presentViewController:alert animated:YES completion:nil];
+    if (!chain.bundleID.length) chain.bundleID = [VMMemoryEngine shared].currentBundleID;
+    if (chain.bundleID.length) [[VMLockManager shared] addPointerToLock:chain];
+    return nil;
+  };
+  __weak __typeof(self) weakSelf = self;
+  form.didSubmit = ^{ [weakSelf.tableView reloadData]; };
+  [form presentFrom:self];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [types layoutIfNeeded];
+    [types scrollRectToVisible:CGRectMake(seg.selectedSegmentIndex * 56, 0, 56, 44) animated:NO];
+  });
 }
 
 - (void)showParentMenu:(VMPointerChain *)parent {
@@ -3650,7 +3694,10 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
   if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
     alert.popoverPresentationController.sourceView = self.tableView;
-    alert.popoverPresentationController.sourceRect = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:[self.activeSignatures indexOfObject:parent] inSection:0]];
+    NSUInteger row = [[self currentDisplayData] indexOfObjectIdenticalTo:parent];
+    alert.popoverPresentationController.sourceRect = row != NSNotFound && row < [self.tableView numberOfRowsInSection:0]
+        ? [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]]
+        : CGRectMake(CGRectGetMidX(self.tableView.bounds), CGRectGetMidY(self.tableView.bounds), 1, 1);
   }
 
   [self presentViewController:alert animated:YES completion:nil];
@@ -3683,7 +3730,10 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 
   if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
     alert.popoverPresentationController.sourceView = self.tableView;
-    alert.popoverPresentationController.sourceRect = [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:[[self buildDisplayListForSignatures] indexOfObject:child] inSection:0]];
+    NSUInteger row = [[self currentDisplayData] indexOfObjectIdenticalTo:child];
+    alert.popoverPresentationController.sourceRect = row != NSNotFound && row < [self.tableView numberOfRowsInSection:0]
+        ? [self.tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]]
+        : CGRectMake(CGRectGetMidX(self.tableView.bounds), CGRectGetMidY(self.tableView.bounds), 1, 1);
   }
 
   [self presentViewController:alert animated:YES completion:nil];
@@ -3713,7 +3763,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 }
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-  if (self.tableView.refreshControl.isRefreshing) return;
+  if (scrollView != self.tableView || self.tableView.refreshControl.isRefreshing) return;
   CGFloat baseOffset = scrollView.adjustedContentInset.top;
   CGFloat pullDistance = -(scrollView.contentOffset.y + baseOffset);
   CGFloat triggerHeight = 45.0;
@@ -3762,7 +3812,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   VMPointerChain *chain = dataSrc[indexPath.row];
   if (![self ensureConnectionForChain:chain]) return;
   NSString *valToWrite = chain.lockValue ?: TR(@"Default_Value");
-  VMDataType type = (chain.lockType == 0) ? VMDataTypeInt32 : (VMDataType)chain.lockType;
+  VMDataType type = (VMDataType)chain.lockType;
   uint64_t finalAddr = [self forceResolveChain:chain];
   if (finalAddr == 0 && chain.bundleID.length > 0 &&
       [self tryReconnectForBundleID:chain.bundleID]) {
@@ -3887,8 +3937,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     if ([self ensureConnectionForBundleID:bid] >= 0) {
       uint64_t finalAddr = [self forceResolveChain:chain];
       if (finalAddr > 0) {
-        VMDataType type = (chain.lockType == 0) ? VMDataTypeInt32
-                                                : (VMDataType)chain.lockType;
+        VMDataType type = (VMDataType)chain.lockType;
         [[VMMemoryEngine shared] writeAddress:finalAddr value:val type:type];
         
         [self showToast:TR(@"Common_Update_Success")];
@@ -3922,8 +3971,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     if ([self ensureConnectionForBundleID:bid] >= 0) {
       uint64_t finalAddr = [self forceResolveChain:chain];
       if (finalAddr > 0) {
-        VMDataType type = (chain.lockType == 0) ? VMDataTypeInt32
-                                                : (VMDataType)chain.lockType;
+        VMDataType type = (VMDataType)chain.lockType;
         [[VMMemoryEngine shared] writeAddress:finalAddr value:val type:type];
         
         [self showToast:TR(@"Common_Update_Success")];
@@ -4154,13 +4202,19 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   UIViewController *contentVC = [[UIViewController alloc] init];
   contentVC.preferredContentSize = CGSizeMake(270, 100);
   contentVC.view.backgroundColor = [UIColor clearColor];
-  NSArray *items = @[TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"), TR(@"Type_F32"), TR(@"Type_F64")];
+  NSArray *items = @[@"I8", @"I16", @"I32", @"I64", @"U8", @"U16", @"U32", @"U64", @"F32", @"F64", @"Str"];
   UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:items];
-  seg.frame = CGRectMake(0, 10, 270, 30);
+  seg.frame = CGRectMake(0, 0, 550, 44);
   NSInteger currentIdx = type;
-  if (currentIdx > 5) currentIdx = 2;
+  if (currentIdx < VMDataTypeInt8 || currentIdx > VMDataTypeString) currentIdx = VMDataTypeInt32;
   seg.selectedSegmentIndex = currentIdx;
-  [contentVC.view addSubview:seg];
+  seg.accessibilityLabel = TR(@"Lock_Select_Type_Title");
+  UIScrollView *types = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 8, 270, 52)];
+  types.showsHorizontalScrollIndicator = NO;
+  types.contentSize = CGSizeMake(550, 44);
+  [types addSubview:seg];
+  [types scrollRectToVisible:CGRectMake(currentIdx * 50, 0, 50, 44) animated:NO];
+  [contentVC.view addSubview:types];
   [alert setValue:contentVC forKey:@"contentViewController"];
 
   [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
@@ -4202,8 +4256,16 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   [sheet addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
 
   if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-    sheet.popoverPresentationController.sourceView = self.navigationItem.titleView;
-    sheet.popoverPresentationController.sourceRect = self.navigationItem.titleView.bounds;
+    UIBarButtonItem *modifyButton = nil;
+    for (UIBarButtonItem *item in self.toolbarItems) {
+      if (item.action == @selector(performBatchModify)) { modifyButton = item; break; }
+    }
+    if (modifyButton) {
+      sheet.popoverPresentationController.barButtonItem = modifyButton;
+    } else {
+      sheet.popoverPresentationController.sourceView = self.view;
+      sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
+    }
   }
   [self presentViewController:sheet animated:YES completion:nil];
 }
@@ -4289,7 +4351,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
       VMPointerChain *chain = dataSrc[ip.row];
       targetAddr = [self forceResolveChain:chain];
       type =
-          (chain.lockType == 0) ? VMDataTypeInt32 : (VMDataType)chain.lockType;
+          (VMDataType)chain.lockType;
 
       NSString *newLockVal = inputVal;
       if (mode == 1) {
@@ -4348,16 +4410,24 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   return self.currentTab == 0 ? @"locked-addresses" : @"favorites";
 }
 
+- (void)updateValueSnapshotButton {
+  if (self.currentTab > 1) return;
+  self.valueSnapshotButton.enabled = [self currentDisplayData].count > 0 ||
+      [[VMMemoryEngine shared] hasValueSnapshotForKey:[self currentValueSnapshotKey]];
+}
+
 - (void)showValueSnapshotMenu {
   NSString *key = [self currentValueSnapshotKey];
   VMMemoryEngine *engine = [VMMemoryEngine shared];
+  BOOL hasItems = [self currentDisplayData].count > 0;
+  if (!hasItems && ![engine hasValueSnapshotForKey:key]) return;
   UIAlertController *sheet = [UIAlertController
-      alertControllerWithTitle:TR(@"Ptr_Snapshot_Take")
+      alertControllerWithTitle:TR(@"Snapshot_Title")
                        message:nil
                 preferredStyle:UIAlertControllerStyleActionSheet];
 
-  [sheet addAction:[UIAlertAction
-                       actionWithTitle:TR(@"Ptr_Snapshot_Take")
+  UIAlertAction *capture = [UIAlertAction
+                       actionWithTitle:TR(@"Snapshot_Save")
                                  style:UIAlertActionStyleDefault
                                handler:^(UIAlertAction *a) {
                                  NSMutableArray<NSDictionary *> *items =
@@ -4371,13 +4441,14 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
                                  NSUInteger count =
                                      [engine captureValueSnapshotForKey:key items:items];
                                  NSString *message = count > 0
-                                     ? [NSString stringWithFormat:@"%@ (%lu)",
-                                                                  TR(@"Ptr_Snapshot_Taken"),
+                                     ? [NSString stringWithFormat:TR(@"Snapshot_Saved_Fmt"),
                                                                   (unsigned long)count]
-                                     : TR(@"Msg_Snapshot_Failed");
+                                     : TR(@"Snapshot_Empty");
                                  [self showToast:message];
                                  [self updateNavBar];
-                               }]];
+                               }];
+  capture.enabled = hasItems;
+  [sheet addAction:capture];
 
   if ([engine hasValueSnapshotForKey:key]) {
     NSString *restoreTitle =
@@ -4410,12 +4481,14 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   NSMutableArray *itemsToShare = [NSMutableArray array];
   NSArray *currentDataSrc = [self currentDisplayData];
 
-  if (self.currentTab == 0) {
+  if (self.currentTab == 0 || self.currentTab == 1) {
     NSMutableString *text = [NSMutableString string];
     for (NSIndexPath *ip in selectedPaths) {
       if (ip.row < currentDataSrc.count) {
         NSDictionary *item = currentDataSrc[ip.row];
-        [text appendFormat:@"0x%llX (%@)\n", [item[@"addr"] unsignedLongLongValue], item[@"val"]];
+        [text appendFormat:@"0x%llX [%@] %@%@\n", [item[@"addr"] unsignedLongLongValue],
+            [self typeNameForType:(VMDataType)[item[@"type"] integerValue]], item[@"val"] ?: @"—",
+            [item[@"note"] length] ? [NSString stringWithFormat:@" · %@", item[@"note"]] : @""];
       }
     }
     [VMShareHelper shareContent:text fromViewController:self sourceView:self.navigationController.navigationBar sourceRect:CGRectMake(self.navigationController.navigationBar.bounds.size.width - 50, 0, 50, 44)];
@@ -5023,7 +5096,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     VMDataType type = VMDataTypeInt32; 
     if (indexPath && indexPath.row < self.activeSignatures.count) {
       VMSignatureModel *sig = self.activeSignatures[indexPath.row];
-      type = (sig.lockType == 0) ? VMDataTypeInt32 : (VMDataType)sig.lockType;
+      type = (VMDataType)sig.lockType;
       
       if (index < sig.runtimeResults.count) {
         NSMutableDictionary *item = [sig.runtimeResults[index] mutableCopy];
@@ -5125,7 +5198,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   NSDictionary *rawDict = sig.runtimeResults[index];
   uint64_t addr = [rawDict[@"addr"] unsignedLongLongValue];
 
-  VMDataType type = (sig.lockType == 0) ? VMDataTypeInt32 : (VMDataType)sig.lockType;
+  VMDataType type = (VMDataType)sig.lockType;
   [[VMMemoryEngine shared] writeAddress:addr value:value type:type];
   
   NSMutableDictionary *item = [rawDict mutableCopy];
@@ -5154,7 +5227,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   
   NSString *value = isOn ? switchOnValue : switchOffValue;
 
-  VMDataType type = (sig.lockType == 0) ? VMDataTypeInt32 : (VMDataType)sig.lockType;
+  VMDataType type = (VMDataType)sig.lockType;
   [[VMMemoryEngine shared] writeAddress:addr value:value type:type];
   
   NSMutableDictionary *item = [rawDict mutableCopy];
@@ -5198,8 +5271,8 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
   if (collectionView == self.tabCollectionView) {
     NSString *text = self.tabItems[indexPath.item];
-    CGSize size = [text sizeWithAttributes:@{NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightMedium]}];
-    return CGSizeMake(size.width + 24, 30);
+    CGSize size = [text sizeWithAttributes:@{NSFontAttributeName: [VMUIHelper scaledFontOfSize:14 weight:UIFontWeightSemibold]}];
+    return CGSizeMake(MAX(76, size.width + 32), 44);
   }
   return CGSizeZero;
 }
@@ -5208,7 +5281,9 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
   if (collectionView == self.tabCollectionView) {
     if (self.currentTab == indexPath.item) return;
+    if (self.tableView.isEditing) [self exitBatchMode];
     self.currentTab = indexPath.item;
+    self.defaultTabIndex = 0;
     [self tabChanged];
     [collectionView scrollToItemAtIndexPath:indexPath atScrollPosition:UICollectionViewScrollPositionCenteredHorizontally animated:YES];
   }
@@ -5361,7 +5436,7 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     if (finalAddr > 0) {
       VMMemoryBrowserViewController *browser = [VMMemoryBrowserViewController new];
       browser.address = finalAddr;
-      browser.type = (VMDataType)(chain.lockType ?: 2);
+      browser.type = (VMDataType)chain.lockType;
       [self.navigationController pushViewController:browser animated:YES];
     }
   }]];

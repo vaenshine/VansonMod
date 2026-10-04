@@ -2,6 +2,7 @@
 #import "../../utils/helpers/VMUIHelper.h"
 #import "../patch/VMBackupListViewController.h"
 #import "../memory/VMProcessAuditViewController.h"
+#import "../common/VMFormSheetViewController.h"
 #import "../../utils/managers/VMBackupManager.h"
 #import "include/VMIconHelper.h"
 #import "include/VMLocalization.h"
@@ -11,6 +12,7 @@
 #import "include/VMLockManager.h"
 #include <signal.h>
 #include <sys/sysctl.h>
+#include <errno.h>
 #define TR(key) ([[VMLocalization shared] localizedString:key])
 extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 #define PROC_PIDPATHINFO_MAXSIZE 4096
@@ -35,7 +37,7 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
 @implementation VMAppSelectViewController
 
 - (instancetype)init {
-  if (self = [super initWithStyle:UITableViewStylePlain]) {
+  if (self = [super initWithStyle:UITableViewStyleInsetGrouped]) {
     _iconCache = [[NSCache alloc] init];
     _filterMode = VMAppFilterRunning;
   }
@@ -44,8 +46,14 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
 
 - (void)viewDidLoad {
   [super viewDidLoad];
-  self.navigationItem.title = TR(@"App_Title");
-  self.view.backgroundColor = [UIColor systemBackgroundColor];
+  self.navigationItem.title = TR(@"Tab_App");
+  self.view.backgroundColor = [VMUIHelper canvasColor];
+  [VMUIHelper styleTableView:self.tableView];
+  self.tableView.rowHeight = UITableViewAutomaticDimension;
+  self.tableView.estimatedRowHeight = 82;
+  self.tableView.sectionHeaderHeight = CGFLOAT_MIN;
+  self.tableView.sectionFooterHeight = CGFLOAT_MIN;
+  if (@available(iOS 15.0, *)) self.tableView.sectionHeaderTopPadding = 0;
 
   self.userApps = [NSMutableArray array];
   self.systemApps = [NSMutableArray array];
@@ -53,10 +61,11 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
 
   // Right nav: backup manager
   self.navigationItem.rightBarButtonItem =
-      [[UIBarButtonItem alloc] initWithTitle:TR(@"Backups_Global_Title")
+      [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"archivebox"]
                                        style:UIBarButtonItemStylePlain
                                       target:self
                                       action:@selector(openGlobalBackup)];
+  self.navigationItem.rightBarButtonItem.accessibilityLabel = TR(@"Backups_Global_Title");
 
   self.navigationItem.leftBarButtonItem = nil;
 
@@ -67,7 +76,6 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
   self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
   self.searchBar.returnKeyType = UIReturnKeySearch;
   self.searchBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-  self.tableView.tableHeaderView = self.searchBar;
   self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
 
   self.segmentControl = [[UISegmentedControl alloc]
@@ -76,7 +84,26 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
   [self.segmentControl addTarget:self
                           action:@selector(segmentChanged)
                 forControlEvents:UIControlEventValueChanged];
-  self.navigationItem.titleView = self.segmentControl;
+  self.segmentControl.accessibilityLabel = TR(@"App_Title");
+  self.segmentControl.translatesAutoresizingMaskIntoConstraints = NO;
+  self.searchBar.translatesAutoresizingMaskIntoConstraints = NO;
+  UIView *header = [UIView new];
+  UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[
+    self.segmentControl, self.searchBar
+  ]];
+  stack.axis = UILayoutConstraintAxisVertical;
+  stack.spacing = 8;
+  stack.translatesAutoresizingMaskIntoConstraints = NO;
+  [header addSubview:stack];
+  [NSLayoutConstraint activateConstraints:@[
+    [stack.topAnchor constraintEqualToAnchor:header.topAnchor constant:8],
+    [stack.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],
+    [stack.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16],
+    [stack.bottomAnchor constraintEqualToAnchor:header.bottomAnchor],
+    [self.segmentControl.heightAnchor constraintEqualToConstant:44],
+    [self.searchBar.heightAnchor constraintEqualToConstant:52]
+  ]];
+  self.tableView.tableHeaderView = header;
 
   [[NSNotificationCenter defaultCenter] addObserver:self
                                            selector:@selector(loadProcesses)
@@ -97,6 +124,51 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
   [VMUIHelper addFixedFooterTo:self forTableView:self.tableView];
 }
 
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  [self updateSegmentTitles];
+  [VMUIHelper sizeHeaderToFitTableView:self.tableView];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
+  if (self.isViewLoaded && [self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+    // Fallback icons are rasterized with the current accent and fill colors.
+    [self.tableView reloadData];
+  }
+}
+
+- (void)updateSegmentTitles {
+  NSString *runningTitle = [NSString stringWithFormat:@"%@ %lu", TR(@"Filter_Running"),
+      (unsigned long)self.userApps.count];
+  if (![[self.segmentControl titleForSegmentAtIndex:VMAppFilterRunning] isEqualToString:runningTitle]) {
+    [self.segmentControl setTitle:runningTitle forSegmentAtIndex:VMAppFilterRunning];
+  }
+}
+
+- (void)updateEmptyState {
+  if (self.displayedApps.count > 0) {
+    self.tableView.backgroundView = nil;
+    return;
+  }
+  NSString *message = self.searchBar.text.length > 0 ? TR(@"App_Search") :
+      (self.filterMode == VMAppFilterAll ? TR(@"Pull_Idle") : TR(@"App_Empty_Processes"));
+  self.tableView.backgroundView = [VMUIHelper emptyStateWithTitle:TR(@"App_Title")
+      message:message symbol:self.searchBar.text.length > 0 ? @"magnifyingglass" : @"apps.iphone"];
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+  return nil;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+  return CGFLOAT_MIN;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {
+  return CGFLOAT_MIN;
+}
+
 - (void)dealloc {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
@@ -111,6 +183,7 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
 #pragma mark - Segment
 
 - (void)segmentChanged {
+  [self updateSegmentTitles];
   self.filterMode = (VMAppFilterMode)self.segmentControl.selectedSegmentIndex;
 
   if (self.filterMode == VMAppFilterRunning) {
@@ -138,6 +211,7 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
     [self searchBar:self.searchBar textDidChange:self.searchBar.text];
   } else {
     [self.tableView reloadData];
+  [self updateEmptyState];
   }
 }
 
@@ -196,6 +270,16 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
 
 #pragma mark - Load Running Processes
 
+- (void)processEnumerationFailed {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self.tableView.refreshControl endRefreshing];
+    if (self.filterMode != VMAppFilterAll && self.displayedApps.count == 0) {
+      self.tableView.backgroundView = [VMUIHelper emptyStateWithTitle:TR(@"App_Title")
+          message:TR(@"App_Empty_Processes") symbol:@"apps.iphone"];
+    }
+  });
+}
+
 - (void)loadProcesses {
   NSMutableArray *tempUser = [NSMutableArray array];
   NSMutableArray *tempSys = [NSMutableArray array];
@@ -206,11 +290,19 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
   ];
 
   int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
-  size_t size;
-  sysctl(mib, 4, NULL, &size, NULL, 0);
+  size_t size = 0;
+  if (sysctl(mib, 4, NULL, &size, NULL, 0) != 0 || size < sizeof(struct kinfo_proc)) {
+    [self processEnumerationFailed];
+    return;
+  }
   struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
-  if (sysctl(mib, 4, procs, &size, NULL, 0) == -1) {
+  if (!procs) {
+    [self processEnumerationFailed];
+    return;
+  }
+  if (sysctl(mib, 4, procs, &size, NULL, 0) != 0) {
     free(procs);
+    [self processEnumerationFailed];
     return;
   }
 
@@ -298,20 +390,8 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
       [self segmentChanged];
     }
 
-    if (self.userApps.count == 0 && self.systemApps.count == 0 && self.filterMode != VMAppFilterAll) {
-      UILabel *emptyLabel = [[UILabel alloc]
-          initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 300)];
-      emptyLabel.text = TR(@"App_Empty_Processes");
-      emptyLabel.textColor = [UIColor systemGrayColor];
-      emptyLabel.textAlignment = NSTextAlignmentCenter;
-      emptyLabel.numberOfLines = 0;
-      emptyLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-      self.tableView.backgroundView = emptyLabel;
-    } else {
-      self.tableView.backgroundView = nil;
-    }
-
     [self.tableView reloadData];
+  [self updateEmptyState];
     if (self.tableView.refreshControl.isRefreshing) {
       [self.tableView.refreshControl endRefreshing];
     }
@@ -367,6 +447,9 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
 #pragma clang diagnostic pop
 
     [temp sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+      BOOL firstStarred = [VMMemoryEngine isProcessStarred:a[@"bid"]];
+      BOOL secondStarred = [VMMemoryEngine isProcessStarred:b[@"bid"]];
+      if (firstStarred != secondStarred) return firstStarred ? NSOrderedAscending : NSOrderedDescending;
       return [a[@"name"] localizedCaseInsensitiveCompare:b[@"name"]];
     }];
 
@@ -384,7 +467,7 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
 - (UIImage *)getAppIcon:(NSString *)exePath isSystem:(BOOL)isSystem {
   if (!exePath || exePath.length == 0) {
     return isSystem ? [UIImage systemImageNamed:@"gear"]
-                    : [VMIconHelper compatibleSystemImageNamed:@"app.fill"];
+                    : [VMIconHelper compatibleSystemImageNamed:@"app.dashed"];
   }
   UIImage *cached = [self.iconCache objectForKey:exePath];
   if (cached) return cached;
@@ -418,12 +501,14 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
       UIImage *img = [UIImage imageWithContentsOfFile:p];
       if (img) {
         [self.iconCache setObject:img forKey:exePath];
+        NSString *bundleID = info[@"CFBundleIdentifier"];
+        if (!img.isSymbolImage && bundleID.length) [VMUIHelper cacheApplicationIcon:img forBundleID:bundleID];
         return img;
       }
     }
   }
   return isSystem ? [UIImage systemImageNamed:@"gear"]
-                  : [VMIconHelper compatibleSystemImageNamed:@"app.fill"];
+                  : [VMIconHelper compatibleSystemImageNamed:@"app.dashed"];
 }
 
 #pragma mark - Search Delegate
@@ -454,6 +539,7 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
   }
   self.displayedApps = [source filteredArrayUsingPredicate:pred];
   [self.tableView reloadData];
+  [self updateEmptyState];
 }
 
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
@@ -481,12 +567,18 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
   if (isStarred) displayName = [NSString stringWithFormat:@"⭐ %@", displayName];
 
   cell.textLabel.text = displayName;
-  cell.textLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightMedium];
+  cell.textLabel.font = [VMUIHelper scaledFontOfSize:17 weight:UIFontWeightSemibold];
+  cell.textLabel.adjustsFontForContentSizeCategory = YES;
+  cell.textLabel.numberOfLines = 0;
+  cell.detailTextLabel.font = [VMUIHelper scaledFontOfSize:12 weight:UIFontWeightRegular];
+  cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
+  cell.detailTextLabel.numberOfLines = 0;
+  cell.backgroundColor = [VMUIHelper cardColor];
 
   NSMutableString *detail = [NSMutableString string];
   if (self.filterMode != VMAppFilterAll && item[@"pid"]) {
     [detail appendFormat:@"PID: %@", item[@"pid"]];
-    if ([bid length] > 0) [detail appendFormat:@" | %@", bid];
+    if ([bid length] > 0) [detail appendFormat:@"\n%@", bid];
   } else {
     if ([bid length] > 0) [detail appendString:bid];
   }
@@ -498,18 +590,28 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
   BOOL isSystem = (self.filterMode == VMAppFilterSystem);
   NSString *iconPath = (self.filterMode == VMAppFilterAll) ? item[@"path"] : item[@"path"];
   UIImage *icon = [self getAppIcon:iconPath isSystem:isSystem];
+  if (icon && !icon.isSymbolImage && bid.length) [VMUIHelper cacheApplicationIcon:icon forBundleID:bid];
 
-  CGSize itemSize = CGSizeMake(29, 29);
-  UIGraphicsBeginImageContextWithOptions(itemSize, NO, UIScreen.mainScreen.scale);
-  [icon drawInRect:CGRectMake(0, 0, 29, 29)];
-  cell.imageView.image = UIGraphicsGetImageFromCurrentImageContext();
-  UIGraphicsEndImageContext();
-  cell.imageView.layer.cornerRadius = 6;
+  [self.traitCollection performAsCurrentTraitCollection:^{
+    CGSize itemSize = CGSizeMake(40, 40);
+    UIGraphicsBeginImageContextWithOptions(itemSize, NO, UIScreen.mainScreen.scale);
+    if (icon.isSymbolImage) {
+      [[[VMUIHelper accentColor] colorWithAlphaComponent:0.1] setFill];
+      UIRectFill(CGRectMake(0, 0, 40, 40));
+      UIImage *tinted = [icon imageWithTintColor:[VMUIHelper accentColor] renderingMode:UIImageRenderingModeAlwaysOriginal];
+      [tinted drawInRect:CGRectMake(7, 7, 26, 26)];
+    } else {
+      [icon drawInRect:CGRectMake(0, 0, 40, 40)];
+    }
+    cell.imageView.image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+  }];
+  cell.imageView.layer.cornerRadius = 10;
   cell.imageView.clipsToBounds = YES;
 
-  cell.accessoryType = (self.filterMode == VMAppFilterAll)
-    ? UITableViewCellAccessoryDisclosureIndicator
-    : UITableViewCellAccessoryNone;
+  cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+  cell.accessibilityLabel = [NSString stringWithFormat:@"%@, %@", displayName, detail];
+  cell.accessibilityHint = nil;
 
   return cell;
 }
@@ -528,6 +630,8 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
   NSString *name = item[@"name"];
   NSString *bid = item[@"bid"];
   NSString *bPath = item[@"bundlePath"] ?: item[@"path"] ?: @"";
+  UIImage *selectedIcon = [self getAppIcon:bPath isSystem:[bid hasPrefix:@"com.apple."]];
+  if (selectedIcon && !selectedIcon.isSymbolImage && bid.length) [VMUIHelper cacheApplicationIcon:selectedIcon forBundleID:bid];
 
   // Resolve PID: from item dict (running mode) or by searching (all mode)
   pid_t pid = 0;
@@ -563,7 +667,12 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
             dispatch_get_main_queue(), ^{
           [toast dismissViewControllerAnimated:YES completion:^{
-            self.tabBarController.selectedIndex = 1;
+            for (UIViewController *page in self.tabBarController.viewControllers) {
+              if (page.tabBarItem.tag == 1) {
+                self.tabBarController.selectedViewController = page;
+                break;
+              }
+            }
           }];
         });
       } else {
@@ -614,6 +723,7 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
       if (isStarred) { [VMMemoryEngine unstarProcess:bid]; [self showToast:TR(@"Msg_Unstarred")]; }
       else { [VMMemoryEngine starProcess:bid]; [self showToast:TR(@"Msg_Starred")]; }
       [self loadProcesses];
+      [self loadInstalledApps];
     }]];
   }
 
@@ -783,10 +893,10 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
 - (VMPointerChain *)parsePointerChainFromString:(NSString *)input {
   if (!input || input.length == 0) return nil;
 
-  NSString *cleanInput = [input stringByReplacingOccurrencesOfString:@" " withString:@""];
+  NSString *cleanInput = [[input componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] componentsJoinedByString:@""];
 
   NSRegularExpression *baseRegex = [NSRegularExpression
-      regularExpressionWithPattern:@"^\\[([^\\+]+)\\+0x([0-9A-Fa-f]+)\\]"
+      regularExpressionWithPattern:@"^\\[([^\\[\\]\\+]+)\\+0[xX]([0-9A-Fa-f]+)\\]"
                            options:0 error:nil];
 
   NSTextCheckingResult *baseMatch = [baseRegex firstMatchInString:cleanInput
@@ -795,25 +905,37 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
 
   NSString *moduleName = [cleanInput substringWithRange:[baseMatch rangeAtIndex:1]];
   NSString *baseOffsetStr = [cleanInput substringWithRange:[baseMatch rangeAtIndex:2]];
+  errno = 0;
   uint64_t baseOffset = strtoull([baseOffsetStr UTF8String], NULL, 16);
+  if (errno == ERANGE) return nil;
 
   NSString *remaining = [cleanInput substringFromIndex:baseMatch.range.length];
   NSMutableArray<NSNumber *> *offsets = [NSMutableArray array];
 
   NSRegularExpression *offsetRegex = [NSRegularExpression
-      regularExpressionWithPattern:@"([\\+\\-]?)0x([0-9A-Fa-f]+)"
+      regularExpressionWithPattern:@"([\\+\\-]?)0[xX]([0-9A-Fa-f]+)"
                            options:0 error:nil];
 
   NSArray *offsetMatches = [offsetRegex matchesInString:remaining
       options:0 range:NSMakeRange(0, remaining.length)];
 
+  NSUInteger parsedLength = 0;
   for (NSTextCheckingResult *match in offsetMatches) {
+    if (match.range.location != parsedLength) return nil;
+    parsedLength = NSMaxRange(match.range);
     NSString *sign = [remaining substringWithRange:[match rangeAtIndex:1]];
     NSString *offsetStr = [remaining substringWithRange:[match rangeAtIndex:2]];
-    int64_t offset = strtoull([offsetStr UTF8String], NULL, 16);
-    if ([sign isEqualToString:@"-"]) offset = -offset;
+    errno = 0;
+    uint64_t magnitude = strtoull([offsetStr UTF8String], NULL, 16);
+    if (errno == ERANGE) return nil;
+    int64_t offset = (int64_t)magnitude;
+    if ([sign isEqualToString:@"-"]) {
+      if (magnitude > (UINT64_C(1) << 63)) return nil;
+      offset = magnitude == (UINT64_C(1) << 63) ? INT64_MIN : -(int64_t)magnitude;
+    } else if (magnitude > INT64_MAX) return nil;
     [offsets addObject:@(offset)];
   }
+  if (parsedLength != remaining.length) return nil;
 
   VMPointerChain *chain = [[VMPointerChain alloc] init];
   chain.moduleName = moduleName;
@@ -823,117 +945,67 @@ typedef NS_ENUM(NSInteger, VMAppFilterMode) {
 }
 
 - (void)showAddPointerAlertForBundleID:(NSString *)bundleID appName:(NSString *)appName {
-  UIAlertController *alert = [UIAlertController
-      alertControllerWithTitle:TR(@"Act_Add_Pointer")
-                       message:TR(@"Ptr_Add_Hint")
-                preferredStyle:UIAlertControllerStyleAlert];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = TR(@"Ptr_Add_Placeholder");
-    tf.keyboardType = UIKeyboardTypeASCIICapable;
-    tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    tf.autocorrectionType = UITextAutocorrectionTypeNo;
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 45, 30)];
-    l.text = TR(@"Ptr_Label_Chain");
-    l.font = [UIFont systemFontOfSize:12];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = TR(@"Placeholder_Note");
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 45, 30)];
-    l.text = TR(@"Lab_Note_Colon");
-    l.font = [UIFont systemFontOfSize:12];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = @"0";
-    tf.keyboardType = UIKeyboardTypeNumberPad;
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 45, 30)];
-    l.text = TR(@"Lab_Value_Colon");
-    l.font = [UIFont systemFontOfSize:12];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-  }];
-
-  [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-    tf.placeholder = TR(@"Placeholder_Author_Default");
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 45, 30)];
-    l.text = TR(@"Lab_Auth_Colon");
-    l.font = [UIFont systemFontOfSize:12];
-    tf.leftView = l;
-    tf.leftViewMode = UITextFieldViewModeAlways;
-
-  }];
-
-  UIViewController *contentVC = [[UIViewController alloc] init];
-  contentVC.preferredContentSize = CGSizeMake(270, 40);
-  UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[
+  VMFormSheetViewController *form = [[VMFormSheetViewController alloc]
+      initWithTitle:TR(@"Act_Add_Pointer") submitTitle:TR(@"Btn_Confirm")];
+  form.message = TR(@"Ptr_Add_Hint");
+  UITextView *chainField = [form addTextViewWithLabel:TR(@"Ptr_Label_Chain") value:nil placeholder:TR(@"Ptr_Add_Placeholder") height:112];
+  chainField.keyboardType = UIKeyboardTypeASCIICapable;
+  chainField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+  chainField.autocorrectionType = UITextAutocorrectionTypeNo;
+  chainField.smartDashesType = UITextSmartDashesTypeNo;
+  chainField.smartQuotesType = UITextSmartQuotesTypeNo;
+  chainField.accessibilityIdentifier = @"pointerChainInput";
+  UITextField *noteField = [form addTextFieldWithLabel:TR(@"Lab_Note_Colon") value:nil
+      placeholder:TR(@"Placeholder_Note") keyboardType:UIKeyboardTypeDefault];
+  UITextField *valueField = [form addTextFieldWithLabel:TR(@"Lab_Value_Colon") value:@"0"
+      placeholder:TR(@"Mod_Input_Value_Placeholder") keyboardType:UIKeyboardTypeNumbersAndPunctuation];
+  UITextField *authorField = [form addTextFieldWithLabel:TR(@"Label_Author") value:TR(@"Placeholder_Author_Default")
+      placeholder:TR(@"Placeholder_Author") keyboardType:UIKeyboardTypeDefault];
+  [form addSectionWithTitle:TR(@"Lock_Select_Type_Title")];
+  UISegmentedControl *typeControl = [[UISegmentedControl alloc] initWithItems:@[
     TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"),
     TR(@"Type_F32"), TR(@"Type_F64")
   ]];
-  seg.frame = CGRectMake(0, 5, 270, 30);
-  seg.selectedSegmentIndex = 2;
-  [contentVC.view addSubview:seg];
-  [alert setValue:contentVC forKey:@"contentViewController"];
+  typeControl.selectedSegmentIndex = 2;
+  typeControl.accessibilityLabel = TR(@"Lock_Select_Type_Title");
+  [typeControl.heightAnchor constraintEqualToConstant:44].active = YES;
+  [form addView:typeControl];
 
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm")
-      style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-    UITextField *tfChain = alert.textFields[0];
-    UITextField *tfNote = alert.textFields[1];
-    UITextField *tfValue = alert.textFields[2];
-    UITextField *tfAuthor = alert.textFields[3];
-
-    NSString *chainStr = tfChain.text;
-    if (!chainStr || chainStr.length == 0) {
-      [self showToast:TR(@"Err_Invalid_Base_Ptr")];
-      return;
-    }
-
-    VMPointerChain *chain = [self parsePointerChainFromString:chainStr];
-    if (!chain) {
-      [self showToast:TR(@"Err_Invalid_Base_Ptr")];
-      return;
-    }
-
+  __weak VMAppSelectViewController *weakSelf = self;
+  form.submitHandler = ^NSString *(VMFormSheetViewController *editor) {
+    VMAppSelectViewController *self = weakSelf;
+    if (!self) return TR(@"Err_Invalid_Base_Ptr");
+    if (!bundleID.length) return TR(@"Err_No_BundleID");
+    VMPointerChain *chain = [self parsePointerChainFromString:chainField.text];
+    if (!chain) return TR(@"Err_Invalid_Base_Ptr");
     chain.bundleID = bundleID;
     chain.appName = appName;
-    chain.note = tfNote.text.length > 0 ? tfNote.text : TR(@"Lock_Default_Note_Ptr");
-    chain.lockValue = tfValue.text.length > 0 ? tfValue.text : @"0";
-    chain.author = tfAuthor.text.length > 0 ? tfAuthor.text : TR(@"Placeholder_Author_Default");
+    chain.note = noteField.text.length > 0 ? noteField.text : TR(@"Lock_Default_Note_Ptr");
+    chain.lockValue = valueField.text.length > 0 ? valueField.text : @"0";
+    chain.author = authorField.text.length > 0 ? authorField.text : TR(@"Placeholder_Author_Default");
     chain.lockEnabled = NO;
     chain.isImported = NO;
-
     static const VMDataType typeMap[] = {
       VMDataTypeInt8, VMDataTypeInt16, VMDataTypeInt32,
       VMDataTypeInt64, VMDataTypeFloat, VMDataTypeDouble
     };
-    NSInteger idx = seg.selectedSegmentIndex;
-    chain.lockType = (idx >= 0 && idx < 6) ? typeMap[idx] : VMDataTypeInt32;
-
+    NSInteger index = typeControl.selectedSegmentIndex;
+    chain.lockType = index >= 0 && index < 6 ? typeMap[index] : VMDataTypeInt32;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
     id proxy = [NSClassFromString(@"LSApplicationProxy")
-        performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:")
-             withObject:bundleID];
+        performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:bundleID];
     if (proxy) {
-      NSString *ver = [proxy performSelector:NSSelectorFromString(@"shortVersionString")];
-      if (!ver) ver = [proxy performSelector:NSSelectorFromString(@"bundleVersion")];
-      chain.appVersion = ver;
+      NSString *version = [proxy performSelector:NSSelectorFromString(@"shortVersionString")];
+      if (!version) version = [proxy performSelector:NSSelectorFromString(@"bundleVersion")];
+      chain.appVersion = version;
     }
 #pragma clang diagnostic pop
-
     [[VMLockManager shared] addPointerToLock:chain];
-    [self showToast:TR(@"Ptr_Lock_Success")];
-  }]];
-
-  [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel")
-      style:UIAlertActionStyleCancel handler:nil]];
-
-  [self presentViewController:alert animated:YES completion:nil];
+    return nil;
+  };
+  form.didSubmit = ^{ [weakSelf showToast:TR(@"Ptr_Lock_Success")]; };
+  [form presentFrom:self];
 }
 
 @end

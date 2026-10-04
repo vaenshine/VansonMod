@@ -1,4 +1,5 @@
 #import "VMScriptToolsViewController.h"
+#import "../../utils/helpers/VMUIHelper.h"
 #import "../../../include/VMLocalization.h"
 #import "VMScriptGuideGenerator.h"
 #import <WebKit/WebKit.h>
@@ -14,13 +15,14 @@
   if (self = [super initWithFrame:frame]) {
     self.contentView.backgroundColor =
         [UIColor tertiarySystemGroupedBackgroundColor];
-    self.contentView.layer.cornerRadius = 8;
+    [VMUIHelper styleCard:self.contentView];
 
     _label = [[UILabel alloc] init];
     _label.textAlignment = NSTextAlignmentCenter;
-    _label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    _label.font = [VMUIHelper scaledFontOfSize:15 weight:UIFontWeightSemibold];
+    _label.adjustsFontForContentSizeCategory = YES;
     _label.textColor = [UIColor labelColor];
-    _label.numberOfLines = 2; 
+    _label.numberOfLines = 0;
     _label.adjustsFontSizeToFitWidth = YES;
     _label.minimumScaleFactor = 0.8;
     _label.translatesAutoresizingMaskIntoConstraints = NO;
@@ -45,9 +47,10 @@
 
 @interface VMScriptShortcutViewController () <
     UICollectionViewDelegate, UICollectionViewDataSource,
-    UICollectionViewDelegateFlowLayout>
+    UICollectionViewDelegateFlowLayout, UISearchResultsUpdating>
 @property(nonatomic, strong) UICollectionView *collectionView;
 @property(nonatomic, strong) NSArray *shortcuts;
+@property(nonatomic, strong) NSArray *displayedShortcuts;
 @end
 
 @implementation VMScriptShortcutViewController
@@ -59,7 +62,7 @@
 
   self.navigationItem.rightBarButtonItem =
       [[UIBarButtonItem alloc] initWithTitle:TR(@"Btn_Cancel") ?: @"Close"
-                                       style:UIBarButtonItemStyleDone
+                                       style:UIBarButtonItemStylePlain
                                       target:self
                                       action:@selector(dismissSelf)];
 
@@ -92,15 +95,29 @@
     @{@"name" : TR(@"Script_Shortcut_Sleep"), @"code" : @"vm.sleep(1.0);"}
   ];
 
+  self.displayedShortcuts = self.shortcuts;
+  UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
+  search.searchResultsUpdater = self;
+  search.obscuresBackgroundDuringPresentation = NO;
+  search.searchBar.placeholder = TR(@"Common_Search");
+  self.navigationItem.searchController = search;
+  self.navigationItem.hidesSearchBarWhenScrolling = NO;
+  if (@available(iOS 16.0, *)) {
+    self.navigationItem.preferredSearchBarPlacement = UINavigationItemSearchBarPlacementStacked;
+  }
+  self.definesPresentationContext = YES;
+
   UICollectionViewFlowLayout *layout =
       [[UICollectionViewFlowLayout alloc] init];
   layout.minimumInteritemSpacing = 12;
   layout.minimumLineSpacing = 12;
-  layout.sectionInset = UIEdgeInsetsMake(20, 12, 20, 12);
+  layout.sectionInset = UIEdgeInsetsMake(16, 16, 16, 16);
 
   _collectionView = [[UICollectionView alloc] initWithFrame:self.view.bounds
                                        collectionViewLayout:layout];
-  _collectionView.backgroundColor = [UIColor clearColor];
+  _collectionView.showsHorizontalScrollIndicator = NO;
+  _collectionView.backgroundColor = [VMUIHelper canvasColor];
+  _collectionView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
   _collectionView.delegate = self;
   _collectionView.dataSource = self;
   _collectionView.autoresizingMask =
@@ -110,13 +127,30 @@
   [self.view addSubview:_collectionView];
 }
 
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  [self.collectionView.collectionViewLayout invalidateLayout];
+}
+
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
+  NSString *query = searchController.searchBar.text ?: @"";
+  self.displayedShortcuts = query.length == 0 ? self.shortcuts :
+      [self.shortcuts filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *entry, NSDictionary *bindings) {
+        return [entry[@"name"] localizedCaseInsensitiveContainsString:query] ||
+               [entry[@"code"] localizedCaseInsensitiveContainsString:query];
+      }]];
+  [self.collectionView reloadData];
+  self.collectionView.backgroundView = self.displayedShortcuts.count > 0 ? nil :
+      [VMUIHelper emptyStateWithTitle:TR(@"Sig_No_Match") message:nil symbol:@"magnifyingglass"];
+}
+
 - (void)dismissSelf {
   [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (NSInteger)collectionView:(UICollectionView *)collectionView
      numberOfItemsInSection:(NSInteger)section {
-  return self.shortcuts.count;
+  return self.displayedShortcuts.count;
 }
 
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView
@@ -125,16 +159,18 @@
       [collectionView dequeueReusableCellWithReuseIdentifier:@"Cell"
                                                 forIndexPath:indexPath];
   
-  cell.contentView.backgroundColor = [UIColor systemBlueColor]; 
-  cell.label.textColor = [UIColor whiteColor];                  
-  cell.label.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
-  cell.label.text = self.shortcuts[indexPath.item][@"name"];
+  cell.contentView.backgroundColor = [VMUIHelper cardColor];
+  cell.label.textColor = [VMUIHelper accentColor];
+  cell.isAccessibilityElement = YES;
+  cell.accessibilityTraits = UIAccessibilityTraitButton;
+  cell.label.text = self.displayedShortcuts[indexPath.item][@"name"];
+  cell.accessibilityLabel = cell.label.text;
   return cell;
 }
 
 - (void)collectionView:(UICollectionView *)collectionView
     didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
-  NSString *code = self.shortcuts[indexPath.item][@"code"];
+  NSString *code = self.displayedShortcuts[indexPath.item][@"code"];
   if (self.didSelectShortcut) {
     self.didSelectShortcut(code);
   }
@@ -145,21 +181,23 @@
                     layout:(UICollectionViewLayout *)collectionViewLayout
     sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
   CGFloat totalWidth = collectionView.bounds.size.width;
-  CGFloat padding = 24.0; 
-  CGFloat spacing = 12.0;
-
-  int cols = 3;
-  if (totalWidth > 600) { 
-    cols = 5;
-  } else if (totalWidth > 400) { 
-    cols = 4;
-  }
-
-  CGFloat availableWidth = totalWidth - padding - (spacing * (cols - 1));
-  CGFloat width = availableWidth / cols;
-  return CGSizeMake(floorf(width), 50);
+  NSInteger cols = MAX(1, (NSInteger)floor((totalWidth - 32 + 12) / 140));
+  CGFloat width = floor((totalWidth - 32 - (cols - 1) * 12) / cols);
+  NSString *title = self.displayedShortcuts[indexPath.item][@"name"];
+  CGRect text = [title boundingRectWithSize:CGSizeMake(width - 16, CGFLOAT_MAX)
+      options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName: [VMUIHelper scaledFontOfSize:15 weight:UIFontWeightSemibold]} context:nil];
+  return CGSizeMake(width, MAX(72, ceil(text.size.height) + 24));
 }
 
+@end
+
+@interface VMScriptMessageProxy : NSObject <WKScriptMessageHandler>
+@property(nonatomic, weak) id<WKScriptMessageHandler> target;
+@end
+@implementation VMScriptMessageProxy
+- (void)userContentController:(WKUserContentController *)controller didReceiveScriptMessage:(WKScriptMessage *)message {
+  [self.target userContentController:controller didReceiveScriptMessage:message];
+}
 @end
 
 @interface VMScriptExampleViewController () <WKNavigationDelegate,
@@ -176,25 +214,53 @@
 
   self.navigationItem.rightBarButtonItem =
       [[UIBarButtonItem alloc] initWithTitle:TR(@"Common_Done")
-                                       style:UIBarButtonItemStyleDone
+                                       style:UIBarButtonItemStylePlain
                                       target:self
                                       action:@selector(dismissSelf)];
 
   WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
   
-  [config.userContentController addScriptMessageHandler:self name:@"vmHandler"];
+  VMScriptMessageProxy *proxy = [VMScriptMessageProxy new];
+  proxy.target = self;
+  [config.userContentController addScriptMessageHandler:proxy name:@"vmHandler"];
 
   self.webView = [[WKWebView alloc] initWithFrame:self.view.bounds
                                     configuration:config];
   self.webView.navigationDelegate = self;
-  self.webView.backgroundColor = [UIColor clearColor];
+  self.webView.scrollView.showsHorizontalScrollIndicator = NO;
+  self.webView.backgroundColor = VMUIHelper.canvasColor;
+  self.webView.scrollView.backgroundColor = VMUIHelper.canvasColor;
   self.webView.opaque = NO;
   self.webView.autoresizingMask =
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   [self.view addSubview:self.webView];
 
   NSString *guideHtml = VMGenerateScriptGuideHTMLComplete();
+  NSString *theme = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark ? @"dark" : @"light";
+  guideHtml = [guideHtml stringByReplacingOccurrencesOfString:@"<html>"
+      withString:[NSString stringWithFormat:@"<html data-theme=\"%@\">", theme]];
   [self.webView loadHTMLString:guideHtml baseURL:nil];
+}
+
+- (void)updateGuideTheme {
+  NSString *theme = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark ? @"dark" : @"light";
+  NSString *script = [NSString stringWithFormat:@"document.documentElement.dataset.theme='%@';", theme];
+  [self.webView evaluateJavaScript:script completionHandler:nil];
+}
+
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+  [self updateGuideTheme];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
+  if (self.isViewLoaded && [self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previousTraitCollection]) {
+    [self updateGuideTheme];
+  }
+}
+
+- (void)dealloc {
+  [self.webView.configuration.userContentController removeScriptMessageHandlerForName:@"vmHandler"];
 }
 
 - (void)userContentController:(WKUserContentController *)userContentController
@@ -205,6 +271,7 @@
 
   NSString *action = body[@"action"];
   NSString *content = body[@"content"];
+  if (![content isKindOfClass:NSString.class]) return;
 
   if ([action isEqualToString:@"copy"]) {
     UIPasteboard.generalPasteboard.string = content;

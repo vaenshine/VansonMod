@@ -1,3 +1,4 @@
+#import "VMMemoryFeedback.h"
 #import <UIKit/UIKit.h>
 
 #import "../../utils/helpers/VMUIHelper.h"
@@ -21,14 +22,16 @@
 @implementation VMByteCell
 - (instancetype)initWithFrame:(CGRect)frame {
   if (self = [super initWithFrame:frame]) {
-    self.contentView.layer.cornerRadius = 4;
+    self.contentView.layer.cornerRadius = 10;
+    self.isAccessibilityElement = YES;
+    self.accessibilityTraits = UIAccessibilityTraitButton;
     self.contentView.layer.borderWidth = 1.0;
 
     _label = [[UILabel alloc] initWithFrame:self.contentView.bounds];
     _label.autoresizingMask =
         UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _label.textAlignment = NSTextAlignmentCenter;
-    _label.font = [UIFont fontWithName:@"Menlo-Bold" size:12];
+    _label.font = [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightSemibold];
     _label.adjustsFontSizeToFitWidth = YES;
     [self.contentView addSubview:_label];
   }
@@ -41,6 +44,9 @@
   self.label.text = byte;
   self.isMaskedCell = masked;
   self.isCenterCell = isCenter;
+  self.accessibilityLabel = byte;
+  self.accessibilityValue = isCenter ? TR(@"Sig_Default_Title") : nil;
+  self.accessibilityTraits = UIAccessibilityTraitButton | (masked ? UIAccessibilityTraitSelected : 0);
   [self updateColors];
 }
 
@@ -56,17 +62,17 @@
 - (void)updateColors {
   if (self.isCenterCell) {
     self.contentView.layer.borderWidth = 2.0;
-    self.contentView.layer.borderColor = [UIColor systemBlueColor].CGColor;
+    self.contentView.layer.borderColor = [[VMUIHelper accentColor] resolvedColorWithTraitCollection:self.traitCollection].CGColor;
   } else {
     self.contentView.layer.borderWidth = 1.0;
-    self.contentView.layer.borderColor = [UIColor opaqueSeparatorColor].CGColor;
+    self.contentView.layer.borderColor = [UIColor.opaqueSeparatorColor resolvedColorWithTraitCollection:self.traitCollection].CGColor;
   }
 
   if (self.isMaskedCell) {
     self.contentView.backgroundColor =
         [[UIColor systemRedColor] colorWithAlphaComponent:0.15];
     if (!self.isCenterCell)
-      self.contentView.layer.borderColor = [UIColor systemRedColor].CGColor;
+      self.contentView.layer.borderColor = [UIColor.systemRedColor resolvedColorWithTraitCollection:self.traitCollection].CGColor;
     self.label.textColor = [UIColor systemRedColor];
   } else {
     self.contentView.backgroundColor =
@@ -82,6 +88,12 @@
     UITableViewDataSource>
 
 @property(nonatomic, strong) UIStackView *rootStackView;
+@property(nonatomic, strong) UIStackView *workspaceStack;
+@property(nonatomic, strong) NSLayoutConstraint *configHeightLimit;
+@property(nonatomic, strong) NSLayoutConstraint *configWidth;
+@property(nonatomic) NSUInteger signatureGeneration;
+@property(nonatomic) pid_t analysisPid;
+@property(nonatomic) mach_port_t analysisTask;
 
 @property(nonatomic, strong) UIScrollView *configScrollView;
 @property(nonatomic, strong) UIStackView *configStackView;
@@ -92,8 +104,8 @@
 
 @property(nonatomic, strong) UILabel *targetAddrLabel;
 @property(nonatomic, strong) UISegmentedControl *rangeSegment;
-@property(nonatomic, strong) UITextField *moduleField; 
-@property(nonatomic, strong) UILabel *moduleDetailLabel; 
+@property(nonatomic, strong) UITextField *moduleField;
+@property(nonatomic, strong) UILabel *moduleDetailLabel;
 
 @property(nonatomic, strong) UICollectionView *byteCollectionView;
 @property(nonatomic, strong) UIButton *btnSmartMask;
@@ -131,11 +143,14 @@
   self.currentBytes = [NSMutableArray array];
   self.scanResults = @[];
   self.targetBundleID = [[VMMemoryEngine shared] currentBundleID];
+  self.analysisPid = [VMMemoryEngine shared].targetPid;
+  self.analysisTask = [VMMemoryEngine shared].targetTask;
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleAnalysisTargetChanged) name:@"VMProcessChangedNotification" object:nil];
   self.hasVerifiedOnce = NO;
 
   [self setupLayout];
 
-  [VMUIHelper addFixedFooterTo:self forTableView:self.resultsTableView];
+
 
   self.rangeSegment.selectedSegmentIndex = 1;
 
@@ -144,6 +159,29 @@
       dispatch_get_main_queue(), ^{
         [self reloadMemoryData];
       });
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+  [super viewWillAppear:animated];
+  [self handleAnalysisTargetChanged];
+}
+
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)handleAnalysisTargetChanged {
+  if ([self analysisTargetIsValid]) return;
+  [self invalidateVerification];
+  [self.currentBytes removeAllObjects];
+  [self.originalBytes removeAllObjects];
+  [self.byteCollectionView reloadData];
+  self.statusLabel.text = TR(@"Str_Target_Changed");
+  self.verifyButton.enabled = NO;
+  self.saveButton.enabled = NO;
+  self.rangeSegment.enabled = NO;
+  self.btnSmartMask.enabled = NO;
+  self.btnRevert.enabled = NO;
 }
 
 - (void)viewDidLayoutSubviews {
@@ -158,22 +196,23 @@
 
   self.rootStackView = [[UIStackView alloc] init];
   self.rootStackView.axis = UILayoutConstraintAxisVertical;
-  self.rootStackView.spacing = 0;
+  self.rootStackView.spacing = 12;
   self.rootStackView.alignment = UIStackViewAlignmentFill;
   self.rootStackView.distribution = UIStackViewDistributionFill;
   self.rootStackView.translatesAutoresizingMaskIntoConstraints = NO;
   [self.view addSubview:self.rootStackView];
 
   [NSLayoutConstraint activateConstraints:@[
-    [self.rootStackView.topAnchor constraintEqualToAnchor:g.topAnchor],
-    [self.rootStackView.leadingAnchor constraintEqualToAnchor:g.leadingAnchor],
+    [self.rootStackView.topAnchor constraintEqualToAnchor:g.topAnchor constant:12],
+    [self.rootStackView.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:16],
     [self.rootStackView.trailingAnchor
-        constraintEqualToAnchor:g.trailingAnchor],
+        constraintEqualToAnchor:g.trailingAnchor constant:-16],
     [self.rootStackView.bottomAnchor
-        constraintEqualToAnchor:self.view.bottomAnchor]
+        constraintEqualToAnchor:g.bottomAnchor constant:-12]
   ]];
 
   self.configScrollView = [[UIScrollView alloc] init];
+  self.configScrollView.showsHorizontalScrollIndicator = NO;
   self.configScrollView.backgroundColor =
       [UIColor systemGroupedBackgroundColor];
   self.configScrollView.alwaysBounceVertical = YES;
@@ -182,7 +221,7 @@
   self.configStackView.axis = UILayoutConstraintAxisVertical;
   self.configStackView.spacing = 16;
   self.configStackView.alignment = UIStackViewAlignmentFill;
-  self.configStackView.layoutMargins = UIEdgeInsetsMake(12, 16, 12, 16);
+  self.configStackView.layoutMargins = UIEdgeInsetsMake(0, 0, 8, 0);
   self.configStackView.layoutMarginsRelativeArrangement = YES;
   self.configStackView.translatesAutoresizingMaskIntoConstraints = NO;
 
@@ -208,18 +247,18 @@
 
   [self.rootStackView addArrangedSubview:self.configScrollView];
 
-  NSLayoutConstraint *heightLimit = [self.configScrollView.heightAnchor
+  self.configHeightLimit = [self.configScrollView.heightAnchor
       constraintLessThanOrEqualToAnchor:g.heightAnchor
                              multiplier:0.45];
-  heightLimit.priority = UILayoutPriorityRequired;
+  self.configHeightLimit.priority = UILayoutPriorityDefaultHigh;
   NSLayoutConstraint *heightMatch = [self.configScrollView.heightAnchor
       constraintEqualToAnchor:self.configStackView.heightAnchor];
   heightMatch.priority = UILayoutPriorityDefaultLow;
   NSLayoutConstraint *minHeight = [self.configScrollView.heightAnchor
-      constraintGreaterThanOrEqualToConstant:150];
+      constraintGreaterThanOrEqualToConstant:100];
 
   [NSLayoutConstraint
-      activateConstraints:@[ heightLimit, heightMatch, minHeight ]];
+      activateConstraints:@[ self.configHeightLimit, heightMatch, minHeight ]];
 
   [self buildSection1];
   [self buildSection2];
@@ -233,48 +272,57 @@
   self.fixedActionContainer.layer.shadowRadius = 2;
   self.fixedActionContainer.layer.zPosition = 10;
 
-  [self.rootStackView addArrangedSubview:self.fixedActionContainer];
+  [VMUIHelper styleCard:self.fixedActionContainer];
+  self.workspaceStack = [UIStackView new];
+  self.workspaceStack.axis = UILayoutConstraintAxisVertical;
+  self.workspaceStack.spacing = 8;
+  [self.rootStackView addArrangedSubview:self.workspaceStack];
+  [self.workspaceStack addArrangedSubview:self.fixedActionContainer];
   [self buildFixedActionSection];
+  self.configWidth = [self.configScrollView.widthAnchor constraintEqualToAnchor:self.rootStackView.widthAnchor multiplier:0.43];
 
   self.resultsTableView =
       [[UITableView alloc] initWithFrame:CGRectZero
                                    style:UITableViewStyleInsetGrouped];
+  self.resultsTableView.showsHorizontalScrollIndicator = NO;
   self.resultsTableView.delegate = self;
   self.resultsTableView.dataSource = self;
   self.resultsTableView.rowHeight = UITableViewAutomaticDimension;
   self.resultsTableView.estimatedRowHeight = 44;
-  self.resultsTableView.contentInset = UIEdgeInsetsMake(0, 0, 40, 0);
+  self.resultsTableView.contentInset = UIEdgeInsetsMake(0, 0, 12, 0);
+  self.resultsTableView.backgroundColor = [UIColor clearColor];
 
-  [self.rootStackView addArrangedSubview:self.resultsTableView];
+  [self.workspaceStack addArrangedSubview:self.resultsTableView];
+  [self.resultsTableView.heightAnchor constraintGreaterThanOrEqualToConstant:60].active = YES;
+  [self updateResultsState];
 }
 
 - (void)updateOrientationLayout {
-  CGSize size = self.view.bounds.size;
-  BOOL isLandscape = size.width > size.height;
-  UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+  CGSize size = self.view.safeAreaLayoutGuide.layoutFrame.size;
+  BOOL wide = size.width >= 600 && size.width > size.height;
+  UILayoutConstraintAxis axis = wide ? UILayoutConstraintAxisHorizontal : UILayoutConstraintAxisVertical;
+  if (self.rootStackView.axis == axis && self.configWidth.active == wide) return;
+  self.configWidth.active = NO;
+  self.configHeightLimit.active = !wide;
+  self.rootStackView.axis = axis;
+  self.configWidth.active = wide;
+}
 
-  if (isLandscape) {
-    if (self.rootStackView.axis != UILayoutConstraintAxisHorizontal) {
-      self.rootStackView.axis = UILayoutConstraintAxisHorizontal;
+- (void)updateResultsState {
+  self.resultsTableView.backgroundView = self.scanResults.count ? nil : [VMUIHelper emptyStateWithTitle:TR(self.hasVerifiedOnce ? @"Sig_No_Match" : @"Sig_Status_Waiting") message:nil symbol:@"waveform.path.ecg"];
+}
 
-      NSLayoutConstraint *w = [self.configScrollView.widthAnchor
-          constraintEqualToAnchor:g.widthAnchor
-                       multiplier:0.4];
-      w.priority = UILayoutPriorityRequired;
-      w.active = YES;
-
-      [self.configScrollView.widthAnchor
-          constraintGreaterThanOrEqualToConstant:300]
-          .active = YES;
-
-      self.configScrollView.alwaysBounceVertical = YES;
-    }
-  } else {
-    if (self.rootStackView.axis != UILayoutConstraintAxisVertical) {
-      self.rootStackView.axis = UILayoutConstraintAxisVertical;
-      
-    }
-  }
+- (void)invalidateVerification {
+  self.signatureGeneration++;
+  self.hasVerifiedOnce = NO;
+  self.lastFoundAddress = 0;
+  self.successCount = 0;
+  self.scanResults = @[];
+  self.statusLabel.text = TR(@"Sig_Status_Waiting");
+  self.statusLabel.textColor = [UIColor secondaryLabelColor];
+  [self.verifyButton setTitle:TR(@"Sig_Btn_Verify") forState:UIControlStateNormal];
+  [self.resultsTableView reloadData];
+  [self updateResultsState];
 }
 
 #pragma mark - Sections
@@ -326,11 +374,12 @@
       [[UICollectionViewFlowLayout alloc] init];
   layout.minimumInteritemSpacing = 4;
   layout.minimumLineSpacing = 6;
-  layout.itemSize = CGSizeMake(34, 34);
+  layout.itemSize = CGSizeMake(44, 44);
   layout.scrollDirection = UICollectionViewScrollDirectionVertical;
 
   self.byteCollectionView = [[UICollectionView alloc] initWithFrame:CGRectZero
                                                collectionViewLayout:layout];
+  self.byteCollectionView.showsHorizontalScrollIndicator = NO;
   self.byteCollectionView.backgroundColor =
       [UIColor secondarySystemGroupedBackgroundColor];
   self.byteCollectionView.layer.cornerRadius = 8;
@@ -341,7 +390,7 @@
   [self.byteCollectionView registerClass:[VMByteCell class]
               forCellWithReuseIdentifier:@"ByteCell"];
 
-  [self.byteCollectionView.heightAnchor constraintEqualToConstant:120].active =
+  [self.byteCollectionView.heightAnchor constraintEqualToConstant:152].active =
       YES;
   [vStack addArrangedSubview:self.byteCollectionView];
 
@@ -402,7 +451,7 @@
 
   self.verifyButton =
       [VMUIHelper createButtonWithTitle:TR(@"Sig_Btn_Verify")
-                                  color:[UIColor systemBlueColor]
+                                  color:[VMUIHelper accentColor]
                                  target:self
                                  action:@selector(verifyAction)];
   self.saveButton = [VMUIHelper createButtonWithTitle:TR(@"Btn_Save")
@@ -418,7 +467,7 @@
   [btnRow addArrangedSubview:self.saveButton];
   [btnRow addArrangedSubview:self.resetButton];
 
-  [btnRow.heightAnchor constraintEqualToConstant:36].active = YES;
+  [btnRow.heightAnchor constraintEqualToConstant:48].active = YES;
   [vStack addArrangedSubview:btnRow];
 
   self.verifySpinner = [[UIActivityIndicatorView alloc]
@@ -438,9 +487,26 @@
 
 #pragma mark - Logic: Reload & Verify
 
+- (BOOL)analysisTargetIsValid {
+  BOOL valid = self.analysisTask != MACH_PORT_NULL && self.analysisTask == [VMMemoryEngine shared].targetTask && self.analysisPid == [VMMemoryEngine shared].targetPid;
+  if (!valid) {
+    self.statusLabel.text = TR(@"Str_Target_Changed");
+    self.saveButton.enabled = NO;
+  }
+  return valid;
+}
+
 - (void)reloadMemoryData {
-  if ([VMMemoryEngine shared].targetTask == MACH_PORT_NULL)
+  [self invalidateVerification];
+  [self.currentBytes removeAllObjects];
+  [self.originalBytes removeAllObjects];
+  self.targetValueRange = NSMakeRange(0, 0);
+  [self.byteCollectionView reloadData];
+  self.saveButton.enabled = NO;
+  if (![self analysisTargetIsValid]) {
+    self.statusLabel.text = TR(@"Err_Not_Connected");
     return;
+  }
 
   int radius = 8;
   switch (self.rangeSegment.selectedSegmentIndex) {
@@ -459,6 +525,7 @@
   }
 
   int totalLen = radius * 2;
+  if (self.initialAddress < (uint64_t)radius) { self.statusLabel.text = TR(@"Ptr_Error_Invalid_Target"); return; }
   uint64_t startAddr = self.initialAddress - radius;
 
   self.currentScanStartAddr = startAddr;
@@ -466,7 +533,10 @@
 
   NSData *data = [[VMMemoryEngine shared] readRawMemory:startAddr
                                                  length:totalLen];
-  if (!data) {
+  if (data.length != (NSUInteger)totalLen) {
+    [self.currentBytes removeAllObjects];
+    [self.originalBytes removeAllObjects];
+    [self.byteCollectionView reloadData];
     self.statusLabel.text = TR(@"Sig_Read_Failed");
     return;
   }
@@ -495,6 +565,7 @@
   }
 
   [self.byteCollectionView reloadData];
+  self.saveButton.enabled = self.currentBytes.count > 0;
 
   self.successCount = 0;
   self.statusLabel.text =
@@ -503,6 +574,7 @@
 }
 
 - (void)verifyAction {
+  if (![self analysisTargetIsValid]) return;
   NSString *sig = [self.currentBytes componentsJoinedByString:@" "];
   if (sig.length == 0)
     return;
@@ -510,10 +582,18 @@
   [self.verifyButton setTitle:@"" forState:UIControlStateNormal];
   self.verifyButton.enabled = NO;
   [self.verifySpinner startAnimating];
-  self.view.userInteractionEnabled = NO;
+  self.saveButton.enabled = NO;
+  self.resetButton.enabled = NO;
+  self.rangeSegment.enabled = NO;
+  self.byteCollectionView.userInteractionEnabled = NO;
+  self.btnSmartMask.enabled = NO;
+  self.btnRevert.enabled = NO;
+  NSUInteger generation = self.signatureGeneration;
+  pid_t pid = [VMMemoryEngine shared].targetPid;
+  mach_port_t task = [VMMemoryEngine shared].targetTask;
 
   self.statusLabel.text = TR(@"Sig_Status_Scanning");
-  self.statusLabel.textColor = [UIColor systemBlueColor];
+  self.statusLabel.textColor = [VMUIHelper accentColor];
 
   self.scanStartTime = [NSDate date];
 
@@ -527,9 +607,21 @@
                              forState:UIControlStateNormal];
 
       weakSelf.verifyButton.enabled = YES;
-      weakSelf.view.userInteractionEnabled = YES;
+      weakSelf.saveButton.enabled = YES;
+      weakSelf.resetButton.enabled = YES;
+      weakSelf.rangeSegment.enabled = YES;
+      weakSelf.byteCollectionView.userInteractionEnabled = YES;
+      weakSelf.btnSmartMask.enabled = YES;
+      weakSelf.btnRevert.enabled = YES;
+      if (generation != weakSelf.signatureGeneration || pid != [VMMemoryEngine shared].targetPid || task != [VMMemoryEngine shared].targetTask) {
+        [weakSelf invalidateVerification];
+        weakSelf.saveButton.enabled = NO;
+        weakSelf.statusLabel.text = TR(@"Str_Target_Changed");
+        return;
+      }
 
       weakSelf.scanResults = results ?: @[];
+      [weakSelf updateResultsState];
       [weakSelf.resultsTableView reloadData];
 
       NSTimeInterval duration =
@@ -583,7 +675,7 @@
     if (selectedModule) {
       weakSelf.originalModuleName = selectedModule.name;
     } else {
-      weakSelf.originalModuleName = nil; 
+      weakSelf.originalModuleName = nil;
     }
 
     weakSelf.moduleField.text = [weakSelf getModuleDisplayName];
@@ -604,16 +696,16 @@
 
 - (void)smartMaskAction {
   BOOL changed = NO;
-  
+
   for (int i = 0; i < (int)self.originalBytes.count - 3; i += 4) {
     unsigned int byte3 = 0;
-    
+
     NSScanner *scanner =
         [NSScanner scannerWithString:self.originalBytes[i + 3]];
     [scanner scanHexInt:&byte3];
 
     if ((byte3 & 0xFC) == 0x94 || (byte3 & 0x9F) == 0x90) {
-      
+
       for (int k = 0; k < 3; k++) {
         if (i + k < self.currentBytes.count) {
           if (![self.currentBytes[i + k] isEqualToString:@"??"]) {
@@ -626,6 +718,7 @@
   }
 
   if (changed) {
+    [self invalidateVerification];
     [self.byteCollectionView reloadData];
     UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc]
         initWithStyle:UIImpactFeedbackStyleMedium];
@@ -637,6 +730,7 @@
 }
 
 - (void)revertManualAction {
+  [self invalidateVerification];
   self.currentBytes = [self.originalBytes mutableCopy];
 
   [self.byteCollectionView reloadData];
@@ -653,6 +747,7 @@
 }
 
 - (void)saveAction {
+  if (![self analysisTargetIsValid] || self.currentBytes.count == 0) return;
   NSString *defaultNote = TR(@"Sig_Default_Note");
   NSString *defaultAuth = TR(@"Sig_Author_Default");
   NSString *sigStr = [self.currentBytes componentsJoinedByString:@" "];
@@ -677,8 +772,9 @@
 
   [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
     tf.text = sigStr;
+    tf.placeholder = @"AA BB ?? CC";
     tf.font = [UIFont fontWithName:@"Menlo" size:12];
-    tf.textColor = [UIColor systemBlueColor];
+    tf.textColor = [VMUIHelper accentColor];
     UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 60, 30)];
     l.text = TR(@"Sig_Label_Sig");
     l.font = [UIFont systemFontOfSize:12];
@@ -691,7 +787,7 @@
     tf.placeholder = TR(@"Placeholder_Author");
     tf.text = defaultAuth;
     UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 60, 30)];
-    l.text = TR(@"Lab_Auth_Colon");
+    l.text = TR(@"Label_Author");
     l.font = [UIFont systemFontOfSize:12];
     l.textColor = [UIColor systemGrayColor];
     tf.leftView = l;
@@ -704,6 +800,7 @@
                     actionWithTitle:TR(@"Btn_Confirm")
                               style:UIAlertActionStyleDefault
                             handler:^(UIAlertAction *a) {
+                              if (![self analysisTargetIsValid]) { [self handleAnalysisTargetChanged]; return; }
                               VMSignatureModel *sig = [[VMSignatureModel alloc] init];
                               NSString *note = alert.textFields[0].text;
                               NSString *finalSig = alert.textFields[1].text;
@@ -717,18 +814,14 @@
                               sig.isImported = NO;
 
                               uint64_t targetAddr = self.initialAddress;
-                              uint64_t matchAddr = self.lastFoundAddress;
-                              if (matchAddr == 0) matchAddr = self.currentScanStartAddr;
-
-                              long long diff = (long long)targetAddr - (long long)matchAddr;
-                              sig.offset = (int)diff;
+                              sig.offset = self.currentOffsetFromStart;
 
                               VMModuleMatch *match = [[VMMemoryEngine shared] findModuleForAddress:targetAddr];
                               if (match) sig.moduleName = match.moduleName;
                               else sig.moduleName = nil;
 
                               [[VMLockManager shared] addSignatureToLock:sig];
-                              
+
                               NSString *fileName;
                               if (self.targetBundleID.length > 0) {
                                 fileName = [NSString stringWithFormat:@"%@-signatures.vmsig", self.targetBundleID];
@@ -760,9 +853,13 @@
   __weak VMSignatureSearchViewController *weakSelf = self;
   [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Go_Toolbox") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
     UITabBarController *tabBar = weakSelf.tabBarController;
-    if (tabBar && tabBar.viewControllers.count > 3) {
-      tabBar.selectedIndex = 3;
-      UINavigationController *nav = (UINavigationController *)tabBar.selectedViewController;
+    UINavigationController *toolbox = nil;
+    for (UIViewController *controller in tabBar.viewControllers) {
+      if (controller.tabBarItem.tag == 3 && [controller isKindOfClass:UINavigationController.class]) { toolbox = (UINavigationController *)controller; break; }
+    }
+    if (toolbox) {
+      tabBar.selectedViewController = toolbox;
+      UINavigationController *nav = toolbox;
       [nav popToRootViewControllerAnimated:NO];
       if ([nav.topViewController isKindOfClass:NSClassFromString(@"VMLockListViewController")]) {
         id lockVC = nav.topViewController;
@@ -793,6 +890,8 @@
     BOOL isMasked = [byte isEqualToString:@"??"];
     BOOL isCenter = NSLocationInRange(indexPath.item, self.targetValueRange);
     [cell configureWithByte:byte isMasked:isMasked isCenter:isCenter];
+    cell.accessibilityLabel = [NSString stringWithFormat:@"0x%llX, %@", self.currentScanStartAddr + indexPath.item, byte];
+    cell.accessibilityValue = isCenter ? [NSString stringWithFormat:TR(@"Sig_Target_Label"), self.initialAddress] : nil;
   }
   return cell;
 }
@@ -807,6 +906,7 @@
   } else {
     self.currentBytes[indexPath.item] = @"??";
   }
+  [self invalidateVerification];
   [UIView performWithoutAnimation:^{
     [collectionView reloadItemsAtIndexPaths:@[ indexPath ]];
   }];
@@ -827,32 +927,35 @@
   UITableViewCell *cell =
       [tableView dequeueReusableCellWithIdentifier:@"ResultCell"];
   if (!cell) {
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                   reuseIdentifier:@"ResultCell"];
     cell.textLabel.font =
         [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
     cell.detailTextLabel.font =
-        [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightBold];
+        [UIFont monospacedDigitSystemFontOfSize:14 weight:UIFontWeightMedium];
   }
 
   VMScanResultItem *item = self.scanResults[indexPath.row];
   uint64_t valAddress = item.address + self.currentOffsetFromStart;
-  NSString *valStr = [[VMMemoryEngine shared] readAddress:valAddress
-                                                     type:self.targetType];
+  NSString *valStr = [self analysisTargetIsValid] ? [[VMMemoryEngine shared] readAddress:valAddress type:self.targetType] : @"—";
 
   cell.textLabel.text = [NSString
       stringWithFormat:@"[%ld] 0x%llX", (long)indexPath.row + 1, valAddress];
   NSString *typeStr = [self typeNameForType:self.targetType];
   cell.detailTextLabel.text =
       [NSString stringWithFormat:@"%@ -> %@", typeStr, valStr ?: @"--"];
-  cell.detailTextLabel.textColor = [UIColor systemBlueColor];
+  cell.detailTextLabel.textColor = [VMUIHelper accentColor];
 
+  cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+  cell.accessibilityTraits = UIAccessibilityTraitButton;
   return cell;
 }
 
 - (void)tableView:(UITableView *)tableView
     didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  if (![self analysisTargetIsValid]) { [self handleAnalysisTargetChanged]; return; }
+  if (indexPath.row >= self.scanResults.count) return;
   VMScanResultItem *item = self.scanResults[indexPath.row];
   uint64_t valAddress = item.address + self.currentOffsetFromStart;
   self.lastFoundAddress = item.address;
@@ -885,9 +988,7 @@
 }
 - (UIView *)createCardView {
   UIView *v = [[UIView alloc] init];
-  v.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-  v.layer.cornerRadius = 10;
-  v.clipsToBounds = YES;
+  [VMUIHelper styleCard:v];
   return v;
 }
 - (UILabel *)createLabel:(NSString *)text
@@ -910,7 +1011,8 @@
   [btn setTitleColor:color forState:UIControlStateNormal];
   btn.backgroundColor = [color colorWithAlphaComponent:0.1];
   btn.layer.cornerRadius = 6;
-  btn.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+  btn.titleLabel.font = [VMUIHelper scaledFontOfSize:14 weight:UIFontWeightMedium];
+  [btn.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
   [btn addTarget:self action:sel forControlEvents:UIControlEventTouchUpInside];
   return btn;
 }
@@ -925,16 +1027,7 @@
   return tf;
 }
 - (void)showToast:(NSString *)msg {
-  UIAlertController *ac =
-      [UIAlertController alertControllerWithTitle:nil
-                                          message:msg
-                                   preferredStyle:UIAlertControllerStyleAlert];
-  [self presentViewController:ac animated:YES completion:nil];
-  dispatch_after(
-      dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
-      dispatch_get_main_queue(), ^{
-        [ac dismissViewControllerAnimated:YES completion:nil];
-      });
+    VMMemoryShowFeedback(self, msg);
 }
 - (int)getSizeForType:(VMDataType)type {
   switch (type) {
