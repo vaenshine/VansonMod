@@ -88,6 +88,18 @@ static size_t getSizeForType(DataType type) {
   }
 }
 
+static size_t getScanStep(DataType type) {
+  // Value width and address alignment are independent for packed 64-bit data.
+  return type == DataType::Int64 || type == DataType::UInt64
+             ? 1 : getSizeForType(type);
+}
+
+template <typename T> static T loadUnaligned(const void *ptr) {
+  T value;
+  memcpy(&value, ptr, sizeof(value));
+  return value;
+}
+
 static bool hasRangeSeparator(const std::string &s) {
   return s.find(',') != std::string::npos ||
          s.find("\xEF\xBC\x8C") != std::string::npos ||
@@ -106,10 +118,10 @@ static bool isUnsignedDataType(DataType type) {
 
 static int64_t readSignedValue(const void *ptr, DataType type) {
   switch (type) {
-    case DataType::Int8: return *(const int8_t *)ptr;
-    case DataType::Int16: return *(const int16_t *)ptr;
-    case DataType::Int32: return *(const int32_t *)ptr;
-    case DataType::Int64: return *(const int64_t *)ptr;
+    case DataType::Int8: return loadUnaligned<int8_t>(ptr);
+    case DataType::Int16: return loadUnaligned<int16_t>(ptr);
+    case DataType::Int32: return loadUnaligned<int32_t>(ptr);
+    case DataType::Int64: return loadUnaligned<int64_t>(ptr);
     default: {
       uint64_t value = 0;
       size_t size = getSizeForType(type);
@@ -121,14 +133,14 @@ static int64_t readSignedValue(const void *ptr, DataType type) {
 
 static uint64_t readUnsignedValue(const void *ptr, DataType type) {
   switch (type) {
-    case DataType::UInt8: return *(const uint8_t *)ptr;
-    case DataType::UInt16: return *(const uint16_t *)ptr;
-    case DataType::UInt32: return *(const uint32_t *)ptr;
-    case DataType::UInt64: return *(const uint64_t *)ptr;
-    case DataType::Int8: return (uint64_t)(uint8_t)(*(const int8_t *)ptr);
-    case DataType::Int16: return (uint64_t)(uint16_t)(*(const int16_t *)ptr);
-    case DataType::Int32: return (uint64_t)(uint32_t)(*(const int32_t *)ptr);
-    case DataType::Int64: return (uint64_t)(*(const int64_t *)ptr);
+    case DataType::UInt8: return loadUnaligned<uint8_t>(ptr);
+    case DataType::UInt16: return loadUnaligned<uint16_t>(ptr);
+    case DataType::UInt32: return loadUnaligned<uint32_t>(ptr);
+    case DataType::UInt64: return loadUnaligned<uint64_t>(ptr);
+    case DataType::Int8: return loadUnaligned<uint8_t>(ptr);
+    case DataType::Int16: return loadUnaligned<uint16_t>(ptr);
+    case DataType::Int32: return loadUnaligned<uint32_t>(ptr);
+    case DataType::Int64: return loadUnaligned<uint64_t>(ptr);
     default: {
       uint64_t value = 0;
       size_t size = getSizeForType(type);
@@ -172,8 +184,8 @@ static bool matchGroupItemValue(const void *ptr, const GroupItem &item,
     return true;
 
   if (isFloatingDataType(item.type)) {
-    double value = item.type == DataType::Float ? (double)(*(const float *)ptr)
-                                                : *(const double *)ptr;
+    double value = item.type == DataType::Float ? (double)loadUnaligned<float>(ptr)
+                                                : loadUnaligned<double>(ptr);
     if (item.isRange) {
       double minValue = groupFloatValue(item.minValue, item.type);
       double maxValue = groupFloatValue(item.maxValue, item.type);
@@ -293,32 +305,98 @@ static bool groupUsesLayoutMode(const std::vector<GroupItem> &items) {
   return false;
 }
 
-static bool matchGroupLayoutAt(uint8_t *memBuffer, size_t readSize,
-                               size_t startOffset,
-                               const std::vector<GroupItem> &items,
-                               double floatTolerance,
-                               std::vector<std::pair<uint64_t, size_t>> &matches,
-                               uint64_t chunkBase) {
-  size_t cursor = startOffset;
+// Group members may be on either side of a scan block. Keep those reads bounded
+// independently of the user-supplied group range, and inside the selected region.
+class GroupScanReader {
+public:
+  GroupScanReader(mach_port_t task, uint64_t start, uint64_t end)
+      : task(task), start(start), end(end) {}
+
+  void setBlock(uint64_t address, const uint8_t *bytes, size_t size) {
+    blockAddress = address;
+    block = bytes;
+    blockSize = size;
+    cachedSize = 0;
+  }
+
+  bool read(uint64_t address, size_t size, void *out) {
+    if (address < start || address >= end || size > end - address)
+      return false;
+    if (address >= blockAddress && address - blockAddress <= blockSize &&
+        size <= blockSize - (address - blockAddress)) {
+      memcpy(out, block + (address - blockAddress), size);
+      return true;
+    }
+    if (address < cachedAddress || address - cachedAddress > cachedSize ||
+        size > cachedSize - (address - cachedAddress)) {
+      cachedAddress = address;
+      mach_vm_size_t requested = std::min<uint64_t>(sizeof(cache), end - address);
+      mach_vm_size_t actual = 0;
+      cachedSize = 0;
+      if (mach_vm_read_overwrite(task, address, requested,
+                                 (mach_vm_address_t)cache, &actual) == KERN_SUCCESS)
+        cachedSize = std::min<uint64_t>(actual, requested);
+    }
+    if (address - cachedAddress > cachedSize ||
+        size > cachedSize - (address - cachedAddress))
+      return false;
+    memcpy(out, cache + (address - cachedAddress), size);
+    return true;
+  }
+
+private:
+  mach_port_t task;
+  uint64_t start, end;
+  uint64_t blockAddress = 0, cachedAddress = 0;
+  const uint8_t *block = nullptr;
+  size_t blockSize = 0, cachedSize = 0;
+  uint8_t cache[4096 + 7];
+};
+
+static bool matchGroupAt(GroupScanReader &reader, uint64_t anchor,
+                         uint64_t regionStart, uint64_t regionEnd,
+                         const std::vector<GroupItem> &items, bool layout,
+                         bool anchorMode, uint64_t range, double tolerance,
+                         std::vector<RawResult> &matches) {
   matches.clear();
+  uint64_t cursor = anchor;
   for (size_t i = 0; i < items.size(); ++i) {
     const GroupItem &item = items[i];
-    if (item.skipBytes > 0) {
-      if (cursor + item.skipBytes > readSize)
+    if (layout && item.skipBytes > 0) {
+      if (cursor > regionEnd || item.skipBytes > regionEnd - cursor)
         return false;
-      cursor += (size_t)item.skipBytes;
+      cursor += item.skipBytes;
       continue;
     }
-
-    size_t itemSize = getSizeForType(item.type);
-    if (cursor + itemSize > readSize)
-      return false;
-    if (!item.isWildcard &&
-        !matchGroupItemValue(memBuffer + cursor, item, floatTolerance))
-      return false;
+    const size_t width = getSizeForType(item.type);
+    uint64_t bits = 0;
+    if (layout || i == 0) {
+      if (!reader.read(cursor, width, &bits) ||
+          (!item.isWildcard && !matchGroupItemValue(&bits, item, tolerance)))
+        return false;
+    } else {
+      const uint64_t center = anchorMode ? anchor : cursor;
+      const uint64_t first = anchorMode
+          ? center - std::min(range, center - regionStart) : center + 1;
+      const uint64_t last = center + std::min(range, regionEnd - 1 - center);
+      bool found = false;
+      for (uint64_t address = first; address <= last; ++address) {
+        if (anchorMode && address == anchor)
+          continue;
+        if (reader.read(address, width, &bits) &&
+            matchGroupItemValue(&bits, item, tolerance)) {
+          cursor = address;
+          found = true;
+          break;
+        }
+      }
+      if (!found)
+        return false;
+    }
     if (!item.isWildcard)
-      matches.push_back({chunkBase + cursor, i});
-    cursor += itemSize;
+      matches.push_back(makeRawResult(cursor, bits, item.type));
+    if (layout)
+      cursor += width;
   }
   return !matches.empty();
 }
@@ -827,160 +905,82 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
         ^(size_t i) {
           Region r = regions[i];
           uint64_t rEnd = std::min(r.start + r.size, endAddress);
-          size_t chunkBufferSize = 1024 * 1024;
-          uint8_t *memBuffer = (uint8_t *)malloc(chunkBufferSize);
+          const size_t chunkBufferSize = 1024 * 1024;
+          // The extra bytes complete a value whose start belongs to this block.
+          uint8_t *memBuffer = (uint8_t *)malloc(chunkBufferSize + 7);
           if (!memBuffer)
             return;
 
           std::vector<RawResult> &localResults = perRegionResultsPtr[i];
           uint64_t curr = r.start;
           DataType alignmentType = dType;
+          DataType strideType = dType;
+          size_t step = getScanStep(dType);
+          size_t scanItemSize = isStringType && targetStringLen > 0
+                                    ? targetStringLen : dataSizeLocal;
           if (searchModeLocal == 2 && !gItemsCopy.empty()) {
             alignmentType = gItemsCopy[0].type;
+            strideType = alignmentType;
+            scanItemSize = getSizeForType(alignmentType);
+            step = getScanStep(alignmentType);
+            if (groupLayoutModeLocal) {
+              scanItemSize = 1;
+              step = 1;
+              for (const auto &item : gItemsCopy) {
+                if (item.skipBytes == 0) {
+                  strideType = item.type;
+                  step = item.isWildcard ? 1 : getScanStep(item.type);
+                  break;
+                }
+              }
+            }
           }
-          int alignmentTypeInt = (int)alignmentType;
-          if ((alignmentTypeInt == (int)DataType::Int64 ||
-               alignmentTypeInt == (int)DataType::UInt64 ||
-               alignmentTypeInt == (int)DataType::Double) && (curr % 8 != 0)) {
-            uint64_t diff = 8 - (curr % 8);
-            curr += diff;
-          }
+          const bool packedInteger = strideType == DataType::Int64 ||
+                                     strideType == DataType::UInt64;
+          if (!packedInteger && alignmentType == DataType::Double && (curr % 8 != 0))
+            curr += 8 - (curr % 8);
+          GroupScanReader groupReader(task, r.start, rEnd);
           while (curr < rEnd) {
-            uint64_t chunkSize =
-                std::min(chunkBufferSize, (size_t)(rEnd - curr));
-            mach_vm_size_t readSize = chunkSize;
-            if (mach_vm_read_overwrite(task, curr, chunkSize,
+            const size_t chunkSize = std::min<uint64_t>(chunkBufferSize, rEnd - curr);
+            const size_t requestedSize = chunkSize + (packedInteger
+                ? std::min<uint64_t>(7, rEnd - curr - chunkSize) : 0);
+            mach_vm_size_t readSize = 0;
+            if (mach_vm_read_overwrite(task, curr, requestedSize,
                                        (mach_vm_address_t)memBuffer,
-                                       &readSize) == KERN_SUCCESS) {
-              
-              size_t limit;
-              if (isStringType && targetStringLen > 0) {
-                limit = readSize >= targetStringLen ? readSize - targetStringLen : 0;
-              } else {
-                size_t scanItemSize = dataSizeLocal;
-                if (searchModeLocal == 2 && groupLayoutModeLocal) {
-                  limit = readSize > 0 ? readSize - 1 : 0;
-                } else if (searchModeLocal == 2 && !gItemsCopy.empty()) {
-                  scanItemSize = getSizeForType(gItemsCopy[0].type);
-                  limit = readSize >= scanItemSize ? readSize - scanItemSize : 0;
-                } else {
-                  limit = readSize >= scanItemSize ? readSize - scanItemSize : 0;
-                }
-              }
-              
-              size_t step;
-              if (searchModeLocal == 2 && groupLayoutModeLocal) {
-                step = 1;
-                for (const auto &item : gItemsCopy) {
-                  if (item.skipBytes == 0) {
-                    step = item.isWildcard ? 1 : getSizeForType(item.type);
-                    break;
-                  }
-                }
-              } else if (searchModeLocal == 2 && !gItemsCopy.empty()) {
-                step = getSizeForType(gItemsCopy[0].type);
-              } else if (dataTypeInt == (int)DataType::String) {
-                step = 1;
-              } else {
-                step = dataSizeLocal;
-              }
+                                       &readSize) == KERN_SUCCESS &&
+                readSize >= scanItemSize) {
+              readSize = std::min<mach_vm_size_t>(readSize, requestedSize);
+              const size_t limit = std::min<size_t>(chunkSize - 1, readSize - scanItemSize);
+              groupReader.setBlock(curr, memBuffer, readSize);
 
               for (size_t k = 0; k <= limit; k += step) {
+                if (searchModeLocal == 0 && packedInteger &&
+                    memBuffer[k] != (uint8_t)targetUInt64) {
+                  // Full-width equality (including I64's pointer mask) requires
+                  // the same low byte. Skip impossible starts within this block.
+                  const uint8_t *candidate = static_cast<const uint8_t *>(
+                      memchr(memBuffer + k, (int)(targetUInt64 & 0xFF), limit - k + 1));
+                  if (!candidate)
+                    break;
+                  k = (size_t)(candidate - memBuffer);
+                }
                 bool match = false;
                 uint64_t valBits = 0;
                 void *ptr = memBuffer + k;
 
-                if (searchModeLocal == 2 && groupLayoutModeLocal) {
-                  std::vector<std::pair<uint64_t, size_t>> matchedItems;
-                  if (matchGroupLayoutAt(memBuffer, readSize, k, gItemsCopy,
-                                         floatTolerance, matchedItems, curr)) {
-                    for (const auto &matchedItem : matchedItems) {
-                      uint64_t addr = matchedItem.first;
-                      size_t itemIndex = matchedItem.second;
-                      size_t valueSize = getSizeForType(gItemsCopy[itemIndex].type);
-                      RawResult res;
-                      res.address = addr;
-                      res.value = 0;
-                      memcpy(&res.value, memBuffer + (addr - curr),
-                             std::min((size_t)8, valueSize));
-                      res.type = (uint8_t)gItemsCopy[itemIndex].type;
-                      res.padding1 = 0;
-                      res.padding2 = 0;
-                      memset(res.padding, 0, sizeof(res.padding));
-                      localResults.push_back(res);
-                    }
-                  }
-                } else if (searchModeLocal == 2) {
-                  const auto &firstItem = gItemsCopy[0];
-                  bool firstMatch = matchGroupItemValue(ptr, firstItem, floatTolerance);
-
-                  if (firstMatch) {
-                    bool allMatched = true;
-                    std::vector<std::pair<uint64_t, size_t>> matchedItems;
-                    matchedItems.push_back({curr + k, 0});
-                    size_t anchorOffset = k; 
-                    size_t lastMatchOffset = k; 
-
-                    for (size_t g = 1; g < gItemsCopy.size(); ++g) {
-                      const auto &nextItem = gItemsCopy[g];
-                      bool foundNext = false;
-                      size_t nextSz = getSizeForType(nextItem.type);
-                      
-                      size_t minOff, maxOff;
-                      if (groupAnchorModeLocal) {
-                        
-                        minOff = (k > groupRangeLocal) ? k - groupRangeLocal : 0;
-                        maxOff = std::min((size_t)(readSize), (size_t)(k + groupRangeLocal + 1));
-                      } else {
-                        
-                        minOff = lastMatchOffset + 1;
-                        maxOff = std::min((size_t)(readSize), (size_t)(lastMatchOffset + groupRangeLocal + 1));
-                      }
-                      
-                      for (size_t off = minOff; off < maxOff; ++off) {
-                        
-                        if (groupAnchorModeLocal && off == anchorOffset)
-                          continue;
-                        if (off + nextSz > readSize)
-                          continue;
-                        void *nPtr = memBuffer + off;
-                        if (matchGroupItemValue(nPtr, nextItem, floatTolerance)) {
-                          foundNext = true;
-                          matchedItems.push_back({curr + off, g});
-                          lastMatchOffset = off;  
-                          break;
-                        }
-                      }
-                      if (!foundNext) {
-                        allMatched = false;
-                        break;
-                      }
-                    }
-
-                    if (allMatched) {
-                      
+                if (searchModeLocal == 2) {
+                  std::vector<RawResult> matchedItems;
+                  if (matchGroupAt(groupReader, curr + k, r.start, rEnd,
+                                   gItemsCopy, groupLayoutModeLocal,
+                                   groupAnchorModeLocal, groupRangeLocal,
+                                   floatTolerance, matchedItems)) {
+                    if (!groupLayoutModeLocal) {
                       std::sort(matchedItems.begin(), matchedItems.end(),
-                                [](const std::pair<uint64_t, size_t> &a,
-                                   const std::pair<uint64_t, size_t> &b) {
-                                  return a.first < b.first;
+                                [](const RawResult &a, const RawResult &b) {
+                                  return a.address < b.address;
                                 });
-                      
-                      for (const auto &matchedItem : matchedItems) {
-                        uint64_t addr = matchedItem.first;
-                        size_t itemIndex = matchedItem.second;
-                        size_t valueSize = getSizeForType(gItemsCopy[itemIndex].type);
-                        RawResult res;
-                        res.address = addr;
-                        res.value = 0;
-                        memcpy(&res.value, memBuffer + (addr - curr),
-                               std::min((size_t)8, valueSize));
-                        res.type = (uint8_t)gItemsCopy[itemIndex].type;
-                        res.padding1 = 0;
-                        res.padding2 = 0;
-                        memset(res.padding, 0, sizeof(res.padding));
-                        localResults.push_back(res);
-                      }
                     }
+                    localResults.insert(localResults.end(), matchedItems.begin(), matchedItems.end());
                   }
                 } else if (searchModeLocal == 3) { 
                   if (isFloatTypeLocal) {
@@ -1235,7 +1235,7 @@ MemoryCore::nextScan(const std::vector<ScanResult> &ignored, DataType type,
               }
             }
             
-            uint8_t buf[8];
+            uint8_t buf[8] = {};
             
             if (isStringType) {
               mach_vm_size_t rSz = 64;
@@ -1283,7 +1283,7 @@ MemoryCore::nextScan(const std::vector<ScanResult> &ignored, DataType type,
               mach_vm_size_t readSz = 4096;
               if (mach_vm_read_overwrite(task, pageAddr, 4096,
                                          (mach_vm_address_t)pageBuffer,
-                                         &readSz) != KERN_SUCCESS) {
+                                         &readSz) != KERN_SUCCESS || readSz != 4096) {
                 cachedPage = (uint64_t)-1;
               }
             }
@@ -1309,7 +1309,7 @@ MemoryCore::nextScan(const std::vector<ScanResult> &ignored, DataType type,
               mach_vm_size_t rSz = actualSize;
               if (mach_vm_read_overwrite(task, raw.address, actualSize,
                                          (mach_vm_address_t)buf,
-                                         &rSz) == KERN_SUCCESS) {
+                                         &rSz) == KERN_SUCCESS && rSz == actualSize) {
                 readSuccess = true;
               }
             }
