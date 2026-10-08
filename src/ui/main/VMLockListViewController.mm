@@ -140,7 +140,9 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   NSString *note = item[@"note"];
 
   if (!valStr) {
-    valStr = [[VMMemoryEngine shared] readAddress:addr type:t];
+    valStr = t == VMDataTypeString
+        ? [[VMMemoryEngine shared] readStringAtAddress:addr encoding:(VMStringEncoding)[item[@"stringEncoding"] unsignedIntegerValue] maxBytes:256]
+        : [[VMMemoryEngine shared] readAddress:addr type:t];
   }
 
   _lblNote.text = (note && note.length > 0)
@@ -1943,8 +1945,10 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     if (![item[@"enabled"] boolValue]) {
       uint64_t addr = [item[@"addr"] unsignedLongLongValue];
       VMDataType type = (VMDataType)[item[@"type"] intValue];
-      NSString *realVal = [[VMMemoryEngine shared] readAddress:addr type:type];
-      item[@"val"] = realVal;
+      NSString *realVal = type == VMDataTypeString
+          ? [[VMMemoryEngine shared] readStringAtAddress:addr encoding:(VMStringEncoding)[item[@"stringEncoding"] unsignedIntegerValue] maxBytes:256]
+          : [[VMMemoryEngine shared] readAddress:addr type:type];
+      item[@"val"] = realVal ?: @"?";
     }
     [cell configureWithDict:item isFavorite:NO];
 
@@ -1967,8 +1971,10 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
     uint64_t addr = [item[@"addr"] unsignedLongLongValue];
     VMDataType type =
         item[@"type"] ? (VMDataType)[item[@"type"] intValue] : VMDataTypeInt32;
-    NSString *realVal = [[VMMemoryEngine shared] readAddress:addr type:type];
-    item[@"val"] = realVal;
+    NSString *realVal = type == VMDataTypeString
+        ? [[VMMemoryEngine shared] readStringAtAddress:addr encoding:(VMStringEncoding)[item[@"stringEncoding"] unsignedIntegerValue] maxBytes:256]
+        : [[VMMemoryEngine shared] readAddress:addr type:type];
+    item[@"val"] = realVal ?: @"?";
     [cell configureWithDict:item isFavorite:YES];
 
     cell.selectionStyle = tableView.isEditing
@@ -3637,12 +3643,12 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
 - (void)showEditTypeAlert:(VMPointerChain *)chain {
   VMFormSheetViewController *form = [[VMFormSheetViewController alloc] initWithTitle:TR(@"Lock_Select_Type_Title") submitTitle:TR(@"Btn_Save")];
   NSArray *items = @[@"I8", @"I16", @"I32", @"I64", @"U8", @"U16", @"U32", @"U64", @"F32", @"F64", @"Str"];
-  UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:items];
+  UISegmentedControl *seg = [[VMScrollableSegmentedControl alloc] initWithItems:items];
   seg.translatesAutoresizingMaskIntoConstraints = NO;
   NSInteger current = chain.lockType;
   seg.selectedSegmentIndex = current >= VMDataTypeInt8 && current <= VMDataTypeString ? current : VMDataTypeInt32;
   seg.accessibilityLabel = TR(@"Lock_Select_Type_Title");
-  UIScrollView *types = [UIScrollView new];
+  UIScrollView *types = [VMControlStripScrollView new];
   types.showsHorizontalScrollIndicator = NO;
   [types addSubview:seg];
   [NSLayoutConstraint activateConstraints:@[
@@ -4203,13 +4209,13 @@ kern_return_t mach_vm_write(vm_map_t, mach_vm_address_t, vm_offset_t,
   contentVC.preferredContentSize = CGSizeMake(270, 100);
   contentVC.view.backgroundColor = [UIColor clearColor];
   NSArray *items = @[@"I8", @"I16", @"I32", @"I64", @"U8", @"U16", @"U32", @"U64", @"F32", @"F64", @"Str"];
-  UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:items];
+  UISegmentedControl *seg = [[VMScrollableSegmentedControl alloc] initWithItems:items];
   seg.frame = CGRectMake(0, 0, 550, 44);
   NSInteger currentIdx = type;
   if (currentIdx < VMDataTypeInt8 || currentIdx > VMDataTypeString) currentIdx = VMDataTypeInt32;
   seg.selectedSegmentIndex = currentIdx;
   seg.accessibilityLabel = TR(@"Lock_Select_Type_Title");
-  UIScrollView *types = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 8, 270, 52)];
+  UIScrollView *types = [[VMControlStripScrollView alloc] initWithFrame:CGRectMake(0, 8, 270, 52)];
   types.showsHorizontalScrollIndicator = NO;
   types.contentSize = CGSizeMake(550, 44);
   [types addSubview:seg];

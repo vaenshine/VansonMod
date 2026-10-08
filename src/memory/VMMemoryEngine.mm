@@ -9,6 +9,7 @@
 #include "../utils/managers/StorageCore.hpp"
 #include "core/MemoryCore.hpp"
 #include "core/SessionCore.hpp"
+#include "core/StringSearch.hpp"
 #import <Foundation/Foundation.h>
 
 #include <mach-o/dyld_images.h>
@@ -74,31 +75,6 @@ static BOOL _starredProcessesLoaded = NO;
 static NSString *getStarredProcessFilePath(void) {
   NSString *basePath = [VMStoragePathHelper vansonModDirectory];
   return [basePath stringByAppendingPathComponent:@"process.vmps"];
-}
-
-static BOOL VMIsVisibleStringByte(uint8_t b) {
-  return (b >= 0x20 && b <= 0x7E) || b >= 0xC0;
-}
-
-static NSString *VMStringFromVisibleBytes(const uint8_t *bytes, NSUInteger length) {
-  if (!bytes || length == 0)
-    return @"";
-
-  NSUInteger len = 0;
-  while (len < length && len < VM_VISIBLE_STRING_MAX_LEN) {
-    if (bytes[len] == '\0')
-      break;
-    if (!VMIsVisibleStringByte(bytes[len]))
-      break;
-    len++;
-  }
-  if (len == 0)
-    return @"";
-
-  NSString *str = [[NSString alloc] initWithBytes:bytes
-                                           length:len
-                                         encoding:NSUTF8StringEncoding];
-  return str ?: @"";
 }
 
 static void saveStarredProcesses(void) {
@@ -177,6 +153,7 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
 @property(nonatomic, strong) NSMutableArray<VMMemoryWriteUndoItem *> *manualWriteUndoStack;
 @property(nonatomic, strong) NSMutableArray<VMMemoryWriteUndoBatch *> *manualWriteUndoBatches;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, VMMemoryWriteUndoBatch *> *valueSnapshots;
+@property(nonatomic, strong) NSMutableArray<NSDictionary *> *sessionSearchOptions;
 @end
 @implementation VMMemoryEngine
 + (instancetype)shared {
@@ -261,6 +238,12 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     _manualWriteUndoStack = [NSMutableArray array];
     _manualWriteUndoBatches = [NSMutableArray array];
     _valueSnapshots = [NSMutableDictionary dictionary];
+    _sessionSearchOptions = [NSMutableArray array];
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    [defaults registerDefaults:@{@"VMStringSearchEncoding": @0, @"VMStringSearchCaseSensitive": @YES}];
+    NSUInteger encoding = [defaults integerForKey:@"VMStringSearchEncoding"];
+    _stringEncoding = encoding <= VMStringEncodingUTF16BE ? (VMStringEncoding)encoding : VMStringEncodingUTF8;
+    _stringCaseSensitive = [defaults boolForKey:@"VMStringSearchCaseSensitive"];
 
     [self switchContext:@"mod"];
     [self loadSettings];
@@ -453,6 +436,9 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   if (self.resultFilePath)
     currentState[@"path"] = self.resultFilePath;
   currentState[@"count"] = @(self.resultCount);
+  currentState[@"dataType"] = @(self.currentDataType);
+  currentState[@"stringEncoding"] = @(self.stringEncoding);
+  currentState[@"stringCaseSensitive"] = @(self.stringCaseSensitive);
   
   if (self.contextPrefix) {
     _contextStates[self.contextPrefix] = currentState;
@@ -469,14 +455,27 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   if (savedState) {
     self.resultFilePath = savedState[@"path"];
     self.resultCount = [savedState[@"count"] unsignedLongValue];
+    self.currentDataType = (VMDataType)[savedState[@"dataType"] unsignedIntegerValue];
+    self.stringEncoding = (VMStringEncoding)[savedState[@"stringEncoding"] unsignedIntegerValue];
+    self.stringCaseSensitive = savedState[@"stringCaseSensitive"] ? [savedState[@"stringCaseSensitive"] boolValue] : YES;
     
     SessionCore::getInstance().clearSnapshots();
+    [self.sessionSearchOptions removeAllObjects];
      
   } else {
     self.resultFilePath = nil;
     self.resultCount = 0;
     
     SessionCore::getInstance().clearSnapshots();
+    [self.sessionSearchOptions removeAllObjects];
+  }
+  if (_core) {
+    std::string savedPath = self.resultFilePath.length ? self.resultFilePath.UTF8String : "";
+    if (!_core->restoreResultsFromFile(savedPath, self.resultCount)) {
+      _core->clearResults();
+      self.resultCount = 0;
+      self.resultFilePath = nil;
+    }
   }
 }
 
@@ -542,6 +541,8 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   item.filePath = snapPath;
   item.resultCount = self.resultCount;
   item.dataType = type;
+  item.stringEncoding = self.stringEncoding;
+  item.stringCaseSensitive = self.stringCaseSensitive;
   item.date = [NSDate date];
   [self.memoryTimeline insertObject:item atIndex:0];
   [self trimMemoryTimelineIfNeeded];
@@ -565,6 +566,8 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     self.resultFilePath = [self getPathA];
     self.resultCount = item.resultCount;
     self.currentDataType = item.dataType;
+    self.stringEncoding = item.stringEncoding;
+    self.stringCaseSensitive = item.stringCaseSensitive;
   } else {
     [fm removeItemAtPath:copyPath error:nil];
   }
@@ -614,6 +617,17 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
                                 oldValue:(NSString *)oldValue
                                  oldData:(NSData *)oldData
                                 newValue:(NSString *)newValue {
+  [self rememberManualWriteUndoAtAddress:address type:type oldValue:oldValue
+      oldData:oldData newValue:newValue stringEncoding:VMStringEncodingUTF8 stringRangeMode:NO];
+}
+
+- (void)rememberManualWriteUndoAtAddress:(uint64_t)address
+                                    type:(VMDataType)type
+                                oldValue:(NSString *)oldValue
+                                 oldData:(NSData *)oldData
+                                newValue:(NSString *)newValue
+                          stringEncoding:(VMStringEncoding)encoding
+                         stringRangeMode:(BOOL)rangeMode {
   if (!oldData || oldData.length == 0)
     return;
 
@@ -626,6 +640,8 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   item.writtenValue = newValue ?: @"";
   item.oldData = oldData;
   item.date = [NSDate date];
+  item.stringEncoding = encoding;
+  item.stringRangeMode = rangeMode;
   [self.manualWriteUndoStack insertObject:item atIndex:0];
 
   const NSUInteger maxItems = 30;
@@ -652,7 +668,30 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     return NO;
 
   BOOL ok = [self writeRawData:item.oldData toAddress:address];
+  if (ok) ok = [[self readRawMemory:address length:item.oldData.length] isEqualToData:item.oldData];
   if (ok) {
+    if (type == VMDataTypeString && !item.stringRangeMode) {
+      size_t length = VMCore::validStringPrefixLength((const uint8_t *)item.oldData.bytes,
+          item.oldData.length, (VMCore::StringEncoding)item.stringEncoding);
+      NSString *value = [[NSString alloc] initWithBytes:item.oldData.bytes length:length
+          encoding:VMFoundationStringEncoding(item.stringEncoding)];
+      NSUInteger unit = item.stringEncoding == VMStringEncodingUTF8 ? 1 : 2;
+      const uint8_t *bytes = (const uint8_t *)item.oldData.bytes;
+      BOOL terminated = item.oldData.length - length >= unit && bytes[length] == 0 &&
+          (unit == 1 || bytes[length + 1] == 0);
+      if (value) {
+        for (NSArray *list in @[self.lockedItems ?: @[], self.favoriteItems ?: @[]]) {
+          for (NSMutableDictionary *entry in list) {
+            if ([entry[@"addr"] unsignedLongLongValue] != address ||
+                [entry[@"type"] unsignedIntegerValue] != VMDataTypeString) continue;
+            entry[@"val"] = value;
+            entry[@"stringEncoding"] = @(item.stringEncoding);
+            entry[@"stringByteCapacity"] = @(MAX([entry[@"stringByteCapacity"] unsignedIntegerValue], item.oldData.length));
+            entry[@"stringTerminatorBytes"] = @(terminated ? unit : 0);
+          }
+        }
+      }
+    }
     [self.manualWriteUndoStack removeObject:item];
   }
   return ok;
@@ -873,6 +912,8 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
 
 #pragma mark - Session Snapshot Stack
 - (void)backupCurrentSession {
+  [self.sessionSearchOptions addObject:@{@"dataType": @(self.currentDataType),
+      @"stringEncoding": @(self.stringEncoding), @"stringCaseSensitive": @(self.stringCaseSensitive)}];
   if (!self.resultFilePath || self.resultCount == 0) {
     SessionCore::getInstance().pushSnapshot("", 0);
     return;
@@ -889,27 +930,30 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   std::string path;
   size_t count;
   if (SessionCore::getInstance().popSnapshot(path, count)) {
+    NSDictionary *options = self.sessionSearchOptions.lastObject;
+    if (options) [self.sessionSearchOptions removeLastObject];
+    BOOL restored = NO;
     if (path.empty() && count == 0) {
       [self clearSession];
+      restored = YES;
     } else {
-      NSString *backupPath = [NSString stringWithUTF8String:path.c_str()];
-      NSFileManager *fm = [NSFileManager defaultManager];
-
-      if ([fm fileExistsAtPath:backupPath]) {
-        NSString *mainPath = [self getPathA];
-        if ([fm fileExistsAtPath:mainPath])
-          [fm removeItemAtPath:mainPath error:nil];
-
-        [fm moveItemAtPath:backupPath toPath:mainPath error:nil];
-        self.resultFilePath = mainPath;
+      if (_core && _core->restoreResultsFromFile(path, count)) {
+        self.resultFilePath = [self getPathA];
         self.resultCount = count;
+        restored = YES;
       }
+    }
+    if (restored && options) {
+      self.currentDataType = (VMDataType)[options[@"dataType"] unsignedIntegerValue];
+      self.stringEncoding = (VMStringEncoding)[options[@"stringEncoding"] unsignedIntegerValue];
+      self.stringCaseSensitive = [options[@"stringCaseSensitive"] boolValue];
     }
   }
 }
 
 - (void)clearAllSnapshots {
   SessionCore::getInstance().clearSnapshots();
+  [self.sessionSearchOptions removeAllObjects];
 }
 
 - (BOOL)hasBackupSession {
@@ -947,10 +991,24 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   }
 
   self.currentDataType = (VMDataType)coreType;
+  VMCore::StringSearchOptions stringOptions;
+  stringOptions.encoding = (VMCore::StringEncoding)self.stringEncoding;
+  stringOptions.caseSensitive = self.stringCaseSensitive;
+  NSData *queryBytes = [valStr dataUsingEncoding:NSUTF8StringEncoding allowLossyConversion:NO];
+  if (coreType == (uint8_t)VMCore::DataType::String) {
+    std::string query = queryBytes.length ?
+        std::string((const char *)queryBytes.bytes, queryBytes.length) : std::string();
+    if (!VMCore::StringSearchPattern(query, stringOptions).valid()) {
+      if (comp) comp(self.resultCount, TR(@"Set_Invalid_Value"));
+      return;
+    }
+  }
 
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
     VMCore::DataType coreDataType = (VMCore::DataType)coreType;
-    std::string cValStr = [valStr UTF8String] ?: "";
+    std::string cValStr = queryBytes.length ?
+        std::string((const char *)queryBytes.bytes, queryBytes.length) : std::string();
+    _core->setStringSearchOptions(stringOptions);
     int cMode = (int)mode;
 
     if (isNext) {
@@ -1104,7 +1162,7 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   item.address = cppItem.address;
   
   VMDataType actualType = (VMDataType)cppItem.type;
-  if (actualType >= VMDataTypeInt8 && actualType <= VMDataTypeDouble) {
+  if (actualType >= VMDataTypeInt8 && actualType <= VMDataTypeString) {
     item.type = actualType;
   } else {
     item.type = type;
@@ -1122,6 +1180,8 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     item.prevValue = @(val);
     item.valueStr = [self formatValue:val type:item.type];
   } else if (item.type == VMDataTypeString) {
+    item.stringEncoding = self.stringEncoding;
+    item.originalSize = cppItem.value.u64;
     item.valueStr = nil;
   } else {
     
@@ -1212,13 +1272,7 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
     return @"(Null)";
   }
   if (type == VMDataTypeString) {
-    uint8_t buf[VM_VISIBLE_STRING_MAX_LEN] = {0};
-    mach_vm_size_t sz = VM_VISIBLE_STRING_MAX_LEN;
-    if (mach_vm_read_overwrite(self.targetTask, address, VM_VISIBLE_STRING_MAX_LEN,
-                               (mach_vm_address_t)buf, &sz) != KERN_SUCCESS) {
-      return @"(? ?)";
-    }
-    return VMStringFromVisibleBytes(buf, (NSUInteger)sz);
+    return [self readStringAtAddress:address encoding:VMStringEncodingUTF8 maxBytes:VM_VISIBLE_STRING_MAX_LEN] ?: @"(? ?)";
   }
   uint8_t buf[8];
   mach_vm_size_t sz = 8;
@@ -1263,6 +1317,60 @@ static void autoSearchProgressBridge(VMCore::MemoryCore::SearchProgress sp,
   if (!_core || !data)
     return NO;
   return _core->writeMemory(address, data.bytes, data.length);
+}
+
+- (NSString *)readStringAtAddress:(uint64_t)address
+                        encoding:(VMStringEncoding)encoding
+                        maxBytes:(NSUInteger)maxBytes {
+  if (address < 0x10000 || address > 0x800000000000ULL || self.targetTask == MACH_PORT_NULL)
+    return nil;
+  if (encoding > VMStringEncodingUTF16BE) encoding = VMStringEncodingUTF8;
+  NSUInteger limit = MIN(maxBytes, (NSUInteger)8192);
+  if (!limit) return @"";
+  NSMutableData *bytes = [NSMutableData dataWithCapacity:limit];
+  NSUInteger unit = encoding == VMStringEncodingUTF8 ? 1 : 2;
+  BOOL terminated = NO;
+  while (bytes.length < limit && !terminated) {
+    NSUInteger count = MIN((NSUInteger)64, limit - bytes.length);
+    NSData *chunk = nil;
+    // A readable string can end immediately before an unreadable page/region.
+    // Reduce the read instead of discarding the valid prefix already collected.
+    while (count > 0 && !(chunk = [self readRawMemory:address + bytes.length length:count])) count /= 2;
+    if (!chunk.length) break;
+    NSUInteger previous = bytes.length;
+    [bytes appendData:chunk];
+    const uint8_t *data = (const uint8_t *)bytes.bytes;
+    for (NSUInteger i = previous - previous % unit; i + unit <= bytes.length; i += unit) {
+      if (data[i] == 0 && (unit == 1 || data[i + 1] == 0)) { terminated = YES; break; }
+    }
+  }
+  if (!bytes.length) return nil;
+  size_t length = VMCore::validStringPrefixLength((const uint8_t *)bytes.bytes, bytes.length,
+      (VMCore::StringEncoding)encoding);
+  return [[NSString alloc] initWithBytes:bytes.bytes length:length
+      encoding:VMFoundationStringEncoding(encoding)] ?: @"";
+}
+
+- (BOOL)writeStringAtAddress:(uint64_t)address value:(NSString *)value encoding:(VMStringEncoding)encoding {
+  if (encoding > VMStringEncodingUTF16BE || !value) return NO;
+  NSData *data = [value dataUsingEncoding:VMFoundationStringEncoding(encoding) allowLossyConversion:NO];
+  return data && [self writeStringAtAddress:address value:value encoding:encoding byteCapacity:data.length];
+}
+
+- (BOOL)writeStringAtAddress:(uint64_t)address value:(NSString *)value
+                   encoding:(VMStringEncoding)encoding byteCapacity:(NSUInteger)byteCapacity {
+  if (encoding > VMStringEncodingUTF16BE || !value || self.targetTask == MACH_PORT_NULL ||
+      address < 0x10000 || address > 0x800000000000ULL || byteCapacity > 8192) return NO;
+  if (encoding != VMStringEncodingUTF8 && byteCapacity % 2) return NO;
+  NSData *data = [value dataUsingEncoding:VMFoundationStringEncoding(encoding) allowLossyConversion:NO];
+  if (!data || data.length > byteCapacity ||
+      VMCore::validStringPrefixLength((const uint8_t *)data.bytes, data.length,
+          (VMCore::StringEncoding)encoding) != data.length) return NO;
+  // The caller supplies a verified writable span. Shorter values clear its
+  // remaining bytes so locking a shortened string also preserves its ending.
+  NSMutableData *bounded = [NSMutableData dataWithLength:byteCapacity];
+  if (data.length) memcpy(bounded.mutableBytes, data.bytes, data.length);
+  return byteCapacity == 0 || [self writeRawData:bounded toAddress:address];
 }
 
 - (BOOL)writeAddress:(uint64_t)address

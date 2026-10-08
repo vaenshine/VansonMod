@@ -3,6 +3,36 @@
 #import <objc/message.h>
 #import <math.h>
 
+@implementation VMControlStripScrollView
+- (BOOL)touchesShouldCancelInContentView:(UIView *)view {
+    UIView *fallback = nil;
+    for (UIView *content = view; content && content != self; content = content.superview) {
+        if ([content isKindOfClass:UIButton.class] ||
+            [content isKindOfClass:UISegmentedControl.class]) {
+            return YES;
+        }
+        if (!fallback && ([content isKindOfClass:UIControl.class] ||
+            [content isKindOfClass:UITextView.class])) {
+            fallback = content;
+        }
+    }
+    return [super touchesShouldCancelInContentView:fallback ?: view];
+}
+@end
+
+@implementation VMScrollableSegmentedControl
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
+    for (UIView *parent = self.superview; parent; parent = parent.superview) {
+        if ([parent isKindOfClass:VMControlStripScrollView.class] &&
+            gestureRecognizer == ((UIScrollView *)parent).panGestureRecognizer) {
+            // Segment tracking must yield when the enclosing strip starts a pan.
+            return YES;
+        }
+    }
+    return [super gestureRecognizerShouldBegin:gestureRecognizer];
+}
+@end
+
 @implementation VMUIHelper
 
 + (NSCache *)applicationIconCache {

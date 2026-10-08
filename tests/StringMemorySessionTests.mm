@@ -151,9 +151,146 @@ static void RunTests(void) {
   f.readableLength = 0;
   Check(![s openStringAtAddress:0x2000 error:&error], "unreadable address rejected");
 }
+static void RunEncodingTests(void) {
+  NSString *error = nil;
+  Check([VMStringMemorySession new].stringEncoding == VMStringEncodingUTF8,
+        "legacy sessions default to UTF-8");
+  for (NSNumber *choice in @[@(VMStringEncodingUTF16LE), @(VMStringEncodingUTF16BE)]) {
+    VMStringEncoding encoding = (VMStringEncoding)choice.unsignedIntegerValue;
+    NSStringEncoding foundation = [VMStringMemorySession foundationEncodingForStringEncoding:encoding];
+    Fixture *f = [Fixture new];
+    VMStringMemorySession *s = f.session;
+    s.stringEncoding = encoding;
+    NSString *original = @"A中😀Z";
+    NSData *encoded = [original dataUsingEncoding:foundation];
+    NSMutableData *sequence = [encoded mutableCopy];
+    uint16_t zero = 0;
+    [sequence appendBytes:&zero length:2];
+    NSData *neighbor = [@"Next" dataUsingEncoding:foundation];
+    [sequence appendData:neighbor];
+    [sequence appendBytes:&zero length:2];
+    const NSUInteger offset = 4097;
+    memcpy((uint8_t *)f.memory.mutableBytes + offset, sequence.bytes, sequence.length);
+    uint64_t address = 0x1000 + offset;
+    Check([s openStringAtAddress:address error:&error], "UTF-16 opens at unaligned address");
+    Check([s.originalText isEqualToString:original] && s.terminated && s.byteLimit == 10,
+          "UTF-16 reads Unicode and surrogate pairs with byte-based capacity");
+    Check(s.originalBytes.length == encoded.length + 2 && s.terminatorByteCount == 2,
+          "UTF-16 snapshot includes complete two-byte terminator");
+    Check(s.foundationEncoding == foundation, "session exposes explicit endian encoding");
+    s.stringEncoding = VMStringEncodingUTF8;
+    Check(s.stringEncoding == encoding, "opening a selection freezes its encoding");
+    Check([s dataForDraft:@"😀😀😀" error:&error] == nil && [error isEqualToString:@"Str_Too_Long"],
+          "UTF-16 byte limit accounts for complete surrogate pairs");
+    Check(f.writes == 0, "oversized UTF-16 draft never writes");
+    Check([s commitDraft:@"汉😀" error:&error], "short UTF-16 Unicode edit succeeds");
+    NSData *shortEncoded = [@"汉😀" dataUsingEncoding:foundation];
+    const uint8_t *memory = (const uint8_t *)f.memory.bytes + offset;
+    Check(!memcmp(memory, shortEncoded.bytes, shortEncoded.length) &&
+          memory[shortEncoded.length] == 0 && memory[shortEncoded.length + 1] == 0,
+          "UTF-16 replacement writes exact endian bytes and two-byte terminator");
+    Check(!memcmp(memory + encoded.length + 2, neighbor.bytes, neighbor.length),
+          "UTF-16 replacement preserves adjacent string");
+    Check(s.byteLimit == shortEncoded.length, "shortened string does not retain stale writable capacity");
+    Check([s undo:&error] && [s.originalText isEqualToString:original] &&
+          !memcmp((const uint8_t *)f.memory.bytes + offset, sequence.bytes, sequence.length),
+          "UTF-16 undo restores complete original span and text");
+    Check(s.stringEncoding == encoding, "UTF-16 undo retains captured encoding");
+    Check([s commitDraft:@"" error:&error] && s.originalBytes.length == 2 && s.byteLimit == 0,
+          "empty UTF-16 edit stores a two-byte terminator");
+    Check([s undo:&error], "empty UTF-16 edit is undoable");
+    Check([s loadMoreBefore:YES error:&error] && [s loadMoreBefore:NO error:&error],
+          "UTF-16 context pages load at original alignment");
+    NSMutableDictionary *texts = [NSMutableDictionary dictionary];
+    for (VMStringMemoryRecord *record in s.records) texts[@(record.address)] = record.text;
+    Check([texts[@(address)] isEqualToString:original] &&
+          [texts[@(address + encoded.length + 2)] isEqualToString:@"Next"],
+          "UTF-16 context preserves string addresses and two-byte separators");
+    Check([s openStringAtAddress:address + encoded.length + 2 error:&error] &&
+          [s.originalText isEqualToString:@"Next"], "context selection reuses original encoding");
+
+    f = [Fixture new]; s = f.session; s.stringEncoding = encoding;
+    NSData *edge = [@"中😀" dataUsingEncoding:foundation];
+    memcpy((uint8_t *)f.memory.mutableBytes + 4096, edge.bytes, edge.length);
+    f.readableLength = 4096 + edge.length;
+    Check([s openStringAtAddress:0x2000 error:&error] && !s.terminated && s.byteLimit == edge.length,
+          "UTF-16 page edge reads only complete code points");
+    Check(![s commitDraft:@"中" error:&error] && f.writes == 0,
+          "unterminated UTF-16 prefix requires exact byte length");
+    Check([s commitDraft:@"文😁" error:&error] && f.writes == 1,
+          "UTF-16 equal-length edit stays inside readable prefix");
+    Check([s undo:&error], "page-edge UTF-16 undo restores exact bytes");
+
+    f = [Fixture new]; s = f.session; s.stringEncoding = encoding;
+    NSData *one = [@"A" dataUsingEncoding:foundation];
+    memcpy((uint8_t *)f.memory.mutableBytes + 4096, one.bytes, 2);
+    ((uint8_t *)f.memory.mutableBytes)[4098] = 0;
+    f.readableLength = 4099;
+    Check([s openStringAtAddress:0x2000 error:&error] && !s.terminated && s.byteLimit == 2,
+          "single trailing zero byte does not count as UTF-16 terminator");
+    Check(![s commitDraft:@"" error:&error], "partial UTF-16 terminator keeps shortening blocked");
+
+    for (NSUInteger count = 1; count <= 3; count++) {
+      f = [Fixture new]; s = f.session; s.stringEncoding = encoding;
+      NSData *surrogate = [@"😀" dataUsingEncoding:foundation];
+      memcpy((uint8_t *)f.memory.mutableBytes + 4096, surrogate.bytes, count);
+      f.readableLength = 4096 + count;
+      Check(![s openStringAtAddress:0x2000 error:&error], "partial UTF-16 surrogate rejected");
+    }
+    uint8_t invalidLE[] = {0x00, 0xdc, 0x00, 0x00};
+    uint8_t invalidBE[] = {0xdc, 0x00, 0x00, 0x00};
+    NSData *invalid = [NSData dataWithBytes:encoding == VMStringEncodingUTF16LE ? invalidLE : invalidBE length:4];
+    Check([VMStringMemorySession textPrefixInData:invalid stringEncoding:encoding
+                                     byteLength:NULL terminated:NULL] == nil,
+          "isolated low surrogate never decodes as text");
+    NSUInteger prefixLength = 0;
+    NSMutableData *badTail = [one mutableCopy];
+    [badTail appendData:invalid];
+    BOOL terminated = YES;
+    Check([[VMStringMemorySession textPrefixInData:badTail stringEncoding:encoding
+               byteLength:&prefixLength terminated:&terminated] isEqualToString:@"A"] &&
+          prefixLength == 2 && !terminated, "invalid surrogate ends readable prefix without claiming termination");
+
+    f = [Fixture new]; s = f.session; s.stringEncoding = encoding;
+    memcpy((uint8_t *)f.memory.mutableBytes + 4096, sequence.bytes, sequence.length);
+    Check([s openStringAtAddress:0x2000 error:&error], "open UTF-16 draft validation fixture");
+    unichar embeddedUnits[] = {'A', 0, 'B'};
+    NSString *embedded = [[NSString alloc] initWithCharacters:embeddedUnits length:3];
+    Check([s dataForDraft:embedded error:&error] == nil, "UTF-16 draft rejects embedded terminator");
+    unichar highOnly = 0xd800;
+    NSString *invalidDraft = [[NSString alloc] initWithCharacters:&highOnly length:1];
+    Check([s dataForDraft:invalidDraft error:&error] == nil, "UTF-16 draft rejects unpaired surrogate");
+    Check([s openRangeFrom:0x2000 through:0x200c error:&error], "UTF-16 session can select odd-size raw range");
+    NSData *rawOriginal = s.originalBytes;
+    Check([[VMStringMemorySession dataForEscapedText:s.originalText] isEqualToData:rawOriginal],
+          "raw range always round-trips exact bytes regardless of string encoding");
+    Check([s commitDraft:@"1234567890123" error:&error] &&
+          !memcmp((const uint8_t *)f.memory.bytes + 4096, "1234567890123", 13),
+          "raw range uses byte escapes and does not silently UTF-16 encode");
+    Check([s undo:&error] && [s.originalBytes isEqualToData:rawOriginal] && s.rangeMode && s.stringEncoding == encoding,
+          "raw range undo preserves original bytes and encoding context");
+
+    for (NSInteger failure = 1; failure <= 3; failure++) {
+      f = [Fixture new]; s = f.session; s.stringEncoding = encoding;
+      memcpy((uint8_t *)f.memory.mutableBytes + 4096, sequence.bytes, sequence.length);
+      Check([s openStringAtAddress:0x2000 error:&error], "open UTF-16 failure fixture");
+      f.failure = failure;
+      Check(![s commitDraft:@"短" error:&error] && [error isEqualToString:@"Str_Write_Unverified"],
+            "UTF-16 failed or partial write fails verification");
+      if (failure == 1) Check(!s.canUndo, "unchanged UTF-16 failed write leaves no undo");
+      else {
+        f.failure = 0;
+        Check(s.canUndo && [s undo:&error] &&
+              !memcmp((const uint8_t *)f.memory.bytes + 4096, sequence.bytes, sequence.length),
+              "UTF-16 partial write has verified exact-span recovery");
+      }
+    }
+  }
+}
 int main(void) {
   @autoreleasepool {
     RunTests();
+    RunEncodingTests();
     printf("PASS: %d string memory checks\n", checks);
   }
   return 0;

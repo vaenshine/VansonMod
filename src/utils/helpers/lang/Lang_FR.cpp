@@ -3,6 +3,13 @@
 
 std::map<std::string, std::string> Lang_FR::getStrings() {
   return {
+    {"Str_Invalid_Text", "Texte incompatible avec le codage sélectionné ou séquence d’échappement invalide. Le mode plage accepte \\\\, \\0, \\n, \\r, \\t, \\xNN ; le mode chaîne réserve U+0000 à la terminaison."},
+    {"Str_Not_Text", "Le codage sélectionné ne permet pas de lire une chaîne à cette adresse. Utilisez le mode plage pour examiner les octets bruts."},
+    {"Str_Use_Editor_Hint", "Ouvrez chaque chaîne dans l’éditeur de texte pour la modifier."},
+    {"Search_Str_Encoding", "Encodage du texte"},
+    {"Search_Str_CaseSensitive", "Respecter la casse"},
+    {"Search_Str_Reset_Hint", "Réinitialisez la recherche pour modifier ces options."},
+    {"Search_Str_Case_Hint", "Désactivez pour ignorer la casse selon Unicode."},
     {"Act_Import", "Importer"},
     {"Set_Auto_Saved", "Les modifications sont enregistrées automatiquement"},
     {"Set_Search_Section", "Paramètres de recherche"},

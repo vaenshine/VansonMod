@@ -21,6 +21,13 @@ enum class DataType : uint8_t {
   String
 };
 
+enum class StringEncoding : uint8_t { UTF8 = 0, UTF16LE = 1, UTF16BE = 2 };
+
+struct StringSearchOptions {
+  StringEncoding encoding = StringEncoding::UTF8;
+  bool caseSensitive = true;
+};
+
 struct ScanResult {
   uint64_t address;
   DataType type;
@@ -36,6 +43,7 @@ struct ScanResult {
     float f;
     double d;
   } value;
+  // For String results, value.u64 stores the matched byte length.
   
   ScanResult() : address(0), type(DataType::Int32) {
     value.i64 = 0;

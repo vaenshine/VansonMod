@@ -3,6 +3,13 @@
 
 std::map<std::string, std::string> Lang_KO::getStrings() {
   return {
+    {"Str_Invalid_Text", "선택한 인코딩에 맞지 않는 텍스트 또는 잘못된 이스케이프입니다. 범위 모드는 \\\\, \\0, \\n, \\r, \\t, \\xNN를 지원하며, 단일 문자열 모드에서 U+0000은 종료 문자로만 사용됩니다."},
+    {"Str_Not_Text", "선택한 인코딩으로 이 주소의 문자열을 읽을 수 없습니다. 범위 편집으로 원시 바이트를 확인하세요."},
+    {"Str_Use_Editor_Hint", "각 문자열을 문자열 편집기에서 열어 수정하세요."},
+    {"Search_Str_Encoding", "문자열 인코딩"},
+    {"Search_Str_CaseSensitive", "대소문자 구분"},
+    {"Search_Str_Reset_Hint", "인코딩이나 대소문자 옵션을 변경하려면 검색을 초기화하세요."},
+    {"Search_Str_Case_Hint", "끄면 Unicode 대소문자를 구분하지 않고 검색합니다."},
     {"Act_Import", "가져오기"},
     {"Set_Auto_Saved", "설정이 자동으로 저장됩니다"},
     {"Set_Search_Section", "검색 매개변수"},

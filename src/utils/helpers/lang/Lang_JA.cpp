@@ -3,6 +3,13 @@
 
 std::map<std::string, std::string> Lang_JA::getStrings() {
   return {
+    {"Str_Invalid_Text", "選択したエンコードで無効な文字列、または無効なエスケープです。範囲モードは \\\\, \\0, \\n, \\r, \\t, \\xNN に対応します。単一文字列モードでは U+0000 は終端専用です。"},
+    {"Str_Not_Text", "このアドレスの文字列を選択したエンコードで読み取れません。範囲編集で生バイトを確認できます。"},
+    {"Str_Use_Editor_Hint", "文字列を個別に開き、文字列エディタで編集してください。"},
+    {"Search_Str_Encoding", "文字列のエンコード"},
+    {"Search_Str_CaseSensitive", "大文字と小文字を区別"},
+    {"Search_Str_Reset_Hint", "エンコードや大小文字の設定を変えるには検索をリセットしてください。"},
+    {"Search_Str_Case_Hint", "オフにすると Unicode の大小文字を区別せず照合します。"},
     {"Act_Import", "読み込む"},
     {"Set_Auto_Saved", "設定は自動保存されます"},
     {"Set_Search_Section", "検索パラメータ"},

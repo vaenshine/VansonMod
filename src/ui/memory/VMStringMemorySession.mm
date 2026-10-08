@@ -26,6 +26,44 @@ static NSUInteger StringScalarSize(const uint8_t *p, NSUInteger remaining) {
   return n;
 }
 
+static NSUInteger StringEncodedScalarSize(const uint8_t *p, NSUInteger remaining,
+                                          VMStringEncoding encoding) {
+  if (encoding == VMStringEncodingUTF8) return StringScalarSize(p, remaining);
+  if (remaining < 2) return 0;
+  BOOL little = encoding == VMStringEncodingUTF16LE;
+  uint16_t a = little ? (uint16_t)(p[0] | p[1] << 8) : (uint16_t)(p[0] << 8 | p[1]);
+  if (a >= 0xd800 && a <= 0xdbff) {
+    if (remaining < 4) return 0;
+    uint16_t b = little ? (uint16_t)(p[2] | p[3] << 8) : (uint16_t)(p[2] << 8 | p[3]);
+    return b >= 0xdc00 && b <= 0xdfff ? 4 : 0;
+  }
+  if (a >= 0xdc00 && a <= 0xdfff) return 0;
+  return ((a >= 0x20 && a != 0x7f) || a == 9 || a == 10 || a == 13) ? 2 : 0;
+}
+
+static NSUInteger StringTerminatorSize(VMStringEncoding encoding) {
+  return encoding == VMStringEncodingUTF8 ? 1 : 2;
+}
+
+static BOOL StringHasTerminator(const uint8_t *p, NSUInteger remaining,
+                                VMStringEncoding encoding) {
+  NSUInteger count = StringTerminatorSize(encoding);
+  return remaining >= count && p[0] == 0 && (count == 1 || p[1] == 0);
+}
+
+static BOOL StringDraftIsValid(NSString *text) {
+  for (NSUInteger i = 0; i < text.length; i++) {
+    unichar value = [text characterAtIndex:i];
+    if (value == 0) return NO;
+    if (value >= 0xd800 && value <= 0xdbff) {
+      if (++i >= text.length) return NO;
+      unichar low = [text characterAtIndex:i];
+      if (low < 0xdc00 || low > 0xdfff) return NO;
+    } else if (value >= 0xdc00 && value <= 0xdfff) return NO;
+  }
+  return YES;
+}
+
 @implementation VMStringMemoryRecord
 @end
 
@@ -45,6 +83,50 @@ static NSUInteger StringScalarSize(const uint8_t *p, NSUInteger remaining) {
 - (instancetype)init {
   if ((self = [super init])) _undoItems = [NSMutableArray array];
   return self;
+}
+
+@synthesize stringEncoding = _stringEncoding;
+
+- (void)setStringEncoding:(VMStringEncoding)encoding {
+  if (self.originalBytes) return;
+  _stringEncoding = encoding <= VMStringEncodingUTF16BE ? encoding : VMStringEncodingUTF8;
+}
+
++ (NSStringEncoding)foundationEncodingForStringEncoding:(VMStringEncoding)encoding {
+  switch (encoding) {
+    case VMStringEncodingUTF16LE: return NSUTF16LittleEndianStringEncoding;
+    case VMStringEncodingUTF16BE: return NSUTF16BigEndianStringEncoding;
+    default: return NSUTF8StringEncoding;
+  }
+}
+
++ (NSString *)nameForStringEncoding:(VMStringEncoding)encoding {
+  switch (encoding) {
+    case VMStringEncodingUTF16LE: return @"UTF-16LE";
+    case VMStringEncodingUTF16BE: return @"UTF-16BE";
+    default: return @"UTF-8";
+  }
+}
+
+- (NSStringEncoding)foundationEncoding {
+  return [self.class foundationEncodingForStringEncoding:self.stringEncoding];
+}
+
+- (NSUInteger)terminatorByteCount { return StringTerminatorSize(self.stringEncoding); }
+
++ (NSString *)textPrefixInData:(NSData *)data stringEncoding:(VMStringEncoding)encoding
+                   byteLength:(NSUInteger *)byteLength terminated:(BOOL *)terminated {
+  const uint8_t *bytes = (const uint8_t *)data.bytes;
+  NSUInteger length = 0, size = 0;
+  while (length < data.length &&
+         (size = StringEncodedScalarSize(bytes + length, data.length - length, encoding))) length += size;
+  BOOL foundTerminator = length < data.length &&
+      StringHasTerminator(bytes + length, data.length - length, encoding);
+  if (byteLength) *byteLength = length;
+  if (terminated) *terminated = foundTerminator;
+  if (!length && !foundTerminator) return nil;
+  return [[NSString alloc] initWithBytes:bytes length:length
+                              encoding:[self foundationEncodingForStringEncoding:encoding]];
 }
 
 - (BOOL)valid {
@@ -73,22 +155,22 @@ static NSUInteger StringScalarSize(const uint8_t *p, NSUInteger remaining) {
 }
 
 - (NSUInteger)byteLimit {
-  return self.originalBytes.length - (self.terminated && !self.rangeMode ? 1 : 0);
+  return self.originalBytes.length - (self.terminated && !self.rangeMode ? self.terminatorByteCount : 0);
 }
 
 - (BOOL)openStringAtAddress:(uint64_t)address error:(NSString **)error {
   if (![self valid]) return StringFail(error, @"Str_Target_Changed");
   NSData *data = [self readPrefix:address limit:MIN((uint64_t)StringMaxEditBytes, UINT64_MAX - address)];
   if (!data.length) return StringFail(error, @"Str_Read_Failed");
-  const uint8_t *p = (const uint8_t *)data.bytes;
-  NSUInteger length = 0, n = 0;
-  while (length < data.length && (n = StringScalarSize(p + length, data.length - length))) length += n;
-  BOOL terminated = length < data.length && p[length] == 0;
-  if (!length && !terminated) return StringFail(error, @"Str_Not_Text");
-  NSData *snapshot = [data subdataWithRange:NSMakeRange(0, length + (terminated ? 1 : 0))];
+  NSUInteger length = 0;
+  BOOL terminated = NO;
+  NSString *text = [self.class textPrefixInData:data stringEncoding:self.stringEncoding
+                                     byteLength:&length terminated:&terminated];
+  if (!text) return StringFail(error, @"Str_Not_Text");
+  NSData *snapshot = [data subdataWithRange:NSMakeRange(0, length + (terminated ? self.terminatorByteCount : 0))];
   self.address = address;
   self.originalBytes = snapshot;
-  self.originalText = [[NSString alloc] initWithBytes:p length:length encoding:NSUTF8StringEncoding] ?: @"";
+  self.originalText = text;
   self.terminated = terminated;
   self.rangeMode = NO;
   [self updateContextSnapshot];
@@ -154,20 +236,32 @@ static NSUInteger StringScalarSize(const uint8_t *p, NSUInteger remaining) {
 }
 
 - (NSArray<VMStringMemoryRecord *> *)records {
+  return [self.class recordsInData:self.contextData atAddress:self.contextStart
+                   stringEncoding:self.stringEncoding alignmentAddress:self.address];
+}
+
++ (NSArray<VMStringMemoryRecord *> *)recordsInData:(NSData *)data
+                                       atAddress:(uint64_t)address
+                                  stringEncoding:(VMStringEncoding)encoding
+                                alignmentAddress:(uint64_t)alignmentAddress {
   NSMutableArray *result = [NSMutableArray array];
-  const uint8_t *p = (const uint8_t *)self.contextData.bytes;
-  NSUInteger total = self.contextData.length, i = 0;
+  const uint8_t *p = (const uint8_t *)data.bytes;
+  NSUInteger stride = StringTerminatorSize(encoding);
+  NSUInteger total = data.length, i = stride == 2 ? ((address ^ alignmentAddress) & 1) : 0;
   while (i < total) {
-    NSUInteger n = StringScalarSize(p + i, total - i);
-    if (!n) { i++; continue; }
+    NSUInteger n = StringEncodedScalarSize(p + i, total - i, encoding);
+    if (!n) { i += MIN(stride, total - i); continue; }
     NSUInteger start = i;
-    do { i += n; } while (i < total && (n = StringScalarSize(p + i, total - i)));
+    do { i += n; } while (i < total && address + i != alignmentAddress &&
+                         (n = StringEncodedScalarSize(p + i, total - i, encoding)));
     VMStringMemoryRecord *record = [VMStringMemoryRecord new];
-    record.address = self.contextStart + start;
-    record.terminated = i < total && p[i] == 0;
-    record.bytes = [self.contextData subdataWithRange:NSMakeRange(start, i - start + (record.terminated ? 1 : 0))];
-    record.text = [[NSString alloc] initWithBytes:p + start length:i - start encoding:NSUTF8StringEncoding];
-    [result addObject:record];
+    record.address = address + start;
+    record.terminated = i < total && StringHasTerminator(p + i, total - i, encoding);
+    record.bytes = [data subdataWithRange:NSMakeRange(start, i - start + (record.terminated ? stride : 0))];
+    record.text = [[NSString alloc] initWithBytes:p + start length:i - start
+                                       encoding:[self foundationEncodingForStringEncoding:encoding]];
+    if (record.text) [result addObject:record];
+    if (record.terminated) i += stride;
   }
   return result;
 }
@@ -235,8 +329,8 @@ static NSUInteger StringScalarSize(const uint8_t *p, NSUInteger remaining) {
 }
 
 - (NSData *)dataForDraft:(NSString *)text error:(NSString **)error {
-  NSData *data = self.rangeMode ? [self.class dataForEscapedText:text] : [text dataUsingEncoding:NSUTF8StringEncoding];
-  if (!data || (!self.rangeMode && [text rangeOfString:[NSString stringWithFormat:@"%C", (unichar)0]].location != NSNotFound)) {
+  NSData *data = self.rangeMode ? [self.class dataForEscapedText:text] : [text dataUsingEncoding:self.foundationEncoding allowLossyConversion:NO];
+  if (!data || (!self.rangeMode && !StringDraftIsValid(text))) {
     StringFail(error, @"Str_Invalid_Text");
     return nil;
   }
@@ -258,14 +352,14 @@ static NSUInteger StringScalarSize(const uint8_t *p, NSUInteger remaining) {
   if (!before) return StringFail(error, @"Str_Read_Failed");
   if (![before isEqualToData:self.originalBytes]) return StringFail(error, @"Str_Conflict");
   NSMutableData *writeData = [payload mutableCopy];
-  if (self.terminated && !self.rangeMode) { uint8_t zero = 0; [writeData appendBytes:&zero length:1]; }
+  if (self.terminated && !self.rangeMode) { uint16_t zero = 0; [writeData appendBytes:&zero length:self.terminatorByteCount]; }
   NSMutableData *expected = [before mutableCopy];
   [expected replaceBytesInRange:NSMakeRange(0, writeData.length) withBytes:writeData.bytes];
   if ([before isEqualToData:expected]) return YES;
   // Retain the complete original span before attempting a write.
   NSMutableDictionary *undo = [@{@"address": @(self.address), @"before": before,
       @"after": expected, @"range": @(self.rangeMode), @"terminated": @(self.terminated),
-      @"text": self.originalText ?: @""} mutableCopy];
+      @"text": self.originalText ?: @"", @"encoding": @(self.stringEncoding)} mutableCopy];
   [self.undoItems addObject:undo];
   if (self.undoItems.count > 10) [self.undoItems removeObjectAtIndex:0];
   BOOL ok = self.writer(self.address, writeData);
@@ -306,6 +400,7 @@ static NSUInteger StringScalarSize(const uint8_t *p, NSUInteger remaining) {
   }
   self.address = address;
   self.originalBytes = before;
+  _stringEncoding = (VMStringEncoding)[item[@"encoding"] unsignedIntegerValue];
   self.originalText = item[@"text"];
   self.rangeMode = [item[@"range"] boolValue];
   self.terminated = [item[@"terminated"] boolValue];

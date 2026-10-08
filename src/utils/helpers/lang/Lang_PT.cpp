@@ -3,6 +3,13 @@
 
 std::map<std::string, std::string> Lang_PT::getStrings() {
   return {
+    {"Str_Invalid_Text", "Texto incompatível com a codificação selecionada ou sequência de escape inválida. O modo de intervalo aceita \\\\, \\0, \\n, \\r, \\t, \\xNN; o modo de string reserva U+0000 para o terminador."},
+    {"Str_Not_Text", "A codificação selecionada não permite ler uma string neste endereço. Use o modo de intervalo para examinar os bytes originais."},
+    {"Str_Use_Editor_Hint", "Abra cada string no editor de texto para editá-la."},
+    {"Search_Str_Encoding", "Codificação do texto"},
+    {"Search_Str_CaseSensitive", "Distinguir maiúsculas"},
+    {"Search_Str_Reset_Hint", "Reinicie a busca para alterar a codificação ou as opções de maiúsculas."},
+    {"Search_Str_Case_Hint", "Desative para ignorar maiúsculas e minúsculas segundo Unicode."},
     {"Act_Import", "Importar"},
     {"Set_Auto_Saved", "As alterações são salvas automaticamente"},
     {"Set_Search_Section", "Parâmetros de pesquisa"},

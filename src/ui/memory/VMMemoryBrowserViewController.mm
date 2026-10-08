@@ -7,6 +7,7 @@
 #import "../memory/VMHexEditorViewController.h"
 #import "../memory/VMMemoryActionSheet.h"
 #import "../../utils/helpers/VMUIHelper.h"
+#import "VMStringMemorySession.h"
 #include <errno.h>
 #define TR(key) ([[VMLocalization shared] localizedString:key])
 #define ROW_HEIGHT 60.0
@@ -439,38 +440,24 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 
     if (fullData.length == 0) return results;
 
-    const uint8_t *bytes = (const uint8_t *)fullData.bytes;
-    NSUInteger len = fullData.length;
-    NSUInteger i = 0;
-
-    while (i < len) {
-        if ([self isPrintableByte:bytes[i]]) {
-            NSUInteger start = i;
-            while (i < len && i - start < STR_MAX_LEN && bytes[i] != '\0' && [self isPrintableByte:bytes[i]]) {
-                i++;
-            }
-            NSUInteger strLen = i - start;
-            if (strLen >= STR_MIN_LEN) {
-                uint64_t addr = actualStart + start;
-                NSString *str = [[NSString alloc] initWithBytes:bytes + start length:strLen encoding:NSUTF8StringEncoding];
-                if (str) {
-                    VMScanResultItem *item = [VMScanResultItem new];
-                    item.address = addr;
-                    item.valueStr = str;
-                    item.originalSize = strLen;
-                    [results addObject:item];
-                }
-            }
-            if (i < len && bytes[i] == '\0') i++;
-        } else {
-            i++;
-        }
+    NSArray<VMStringMemoryRecord *> *records = [VMStringMemorySession
+        recordsInData:fullData atAddress:actualStart stringEncoding:self.stringEncoding
+        alignmentAddress:self.targetAddress];
+    for (VMStringMemoryRecord *record in records) {
+        NSData *prefix = [record.bytes subdataWithRange:NSMakeRange(0, MIN(record.bytes.length, (NSUInteger)STR_MAX_LEN))];
+        NSUInteger byteLength = 0;
+        NSString *text = [VMStringMemorySession textPrefixInData:prefix stringEncoding:self.stringEncoding
+                                                    byteLength:&byteLength terminated:NULL];
+        if (byteLength < STR_MIN_LEN || !text) continue;
+        VMScanResultItem *item = [VMScanResultItem new];
+        item.address = record.address;
+        item.valueStr = text;
+        item.type = VMDataTypeString;
+        item.stringEncoding = self.stringEncoding;
+        item.originalSize = byteLength;
+        [results addObject:item];
     }
     return results;
-}
-
-- (BOOL)isPrintableByte:(uint8_t)b {
-    return (b >= 0x20 && b <= 0x7E) || b >= 0xC0;
 }
 
 - (void)startAutoRefreshTimer {
@@ -500,35 +487,18 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
 - (NSString *)readVisibleStringAtAddress:(uint64_t)address
                                 fallback:(NSString *)fallback
                                lengthOut:(NSUInteger *)lengthOut {
-    NSUInteger fallbackLen = [fallback lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-    NSUInteger readLength = MIN(MAX(fallbackLen + 1, (NSUInteger)64), (NSUInteger)STR_MAX_LEN);
-    NSData *data = [[VMMemoryEngine shared] readRawMemory:address length:readLength];
-    if (data.length == 0) {
+    NSStringEncoding encoding = VMFoundationStringEncoding(self.stringEncoding);
+    NSUInteger fallbackLen = [fallback lengthOfBytesUsingEncoding:encoding];
+    NSUInteger terminatorSize = self.stringEncoding == VMStringEncodingUTF8 ? 1 : 2;
+    NSUInteger readLength = MIN(MAX(fallbackLen + terminatorSize, (NSUInteger)64), (NSUInteger)STR_MAX_LEN);
+    NSString *text = [[VMMemoryEngine shared] readStringAtAddress:address
+                                                      encoding:self.stringEncoding maxBytes:readLength];
+    if (!text) {
         if (lengthOut) *lengthOut = fallbackLen;
-        return fallback ?: @"";
+        return fallback;
     }
-
-    const uint8_t *bytes = (const uint8_t *)data.bytes;
-    NSUInteger len = 0;
-    while (len < data.length && len < STR_MAX_LEN) {
-        if (bytes[len] == '\0') break;
-        if (![self isPrintableByte:bytes[len]]) break;
-        len++;
-    }
-
-    if (len == 0) {
-        if (lengthOut) *lengthOut = fallbackLen;
-        return fallback ?: @"";
-    }
-
-    NSString *str = [[NSString alloc] initWithBytes:bytes length:len encoding:NSUTF8StringEncoding];
-    if (!str) {
-        if (lengthOut) *lengthOut = fallbackLen;
-        return fallback ?: @"";
-    }
-
-    if (lengthOut) *lengthOut = len;
-    return str;
+    if (lengthOut) *lengthOut = [text lengthOfBytesUsingEncoding:encoding];
+    return text;
 }
 
 - (VMScanResultItem *)stringItemAtAddress:(uint64_t)address fallback:(NSString *)fallback {
@@ -541,6 +511,8 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
     VMScanResultItem *item = [VMScanResultItem new];
     item.address = address;
     item.valueStr = value ?: (fallback ?: @"");
+    item.type = VMDataTypeString;
+    item.stringEncoding = self.stringEncoding;
     item.originalSize = len;
     return item;
 }
@@ -945,6 +917,7 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
         [VMMemoryActionSheet showActionSheetForAddress:item.address
                                                 value:item.valueStr
                                              dataType:VMDataTypeString
+                                       stringEncoding:self.stringEncoding
                                    fromViewController:self
                                            sourceView:tableView
                                            sourceRect:[tableView rectForRowAtIndexPath:indexPath]
@@ -981,48 +954,6 @@ static NSAttributedString *VMBrowserAddressText(uint64_t address, uint64_t targe
                                         sourceView:tableView
                                         sourceRect:rect
                                          extraItem:nil];
-}
-
-- (void)showStrEditAlert:(VMScanResultItem *)item indexPath:(NSIndexPath *)indexPath {
-    NSString *msg = [NSString stringWithFormat:@"0x%llX\n%@ %lu", item.address, TR(@"Browser_Str_OrigLen"), (unsigned long)item.originalSize];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:TR(@"Browser_Str_Edit") message:msg preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.text = item.valueStr;
-        tf.placeholder = TR(@"Mod_Input_Str");
-        tf.keyboardType = UIKeyboardTypeDefault;
-        tf.clearButtonMode = UITextFieldViewModeAlways;
-    }];
-
-    __weak __typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Confirm") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        NSString *newVal = alert.textFields.firstObject.text ?: @"";
-        NSUInteger newLen = [newVal lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-
-        if (newLen > item.originalSize) {
-            NSString *warnMsg = [NSString stringWithFormat:TR(@"Browser_Str_Overflow_Msg"), (unsigned long)item.originalSize, (unsigned long)newLen];
-            UIAlertController *warn = [UIAlertController alertControllerWithTitle:TR(@"Browser_Str_Overflow") message:warnMsg preferredStyle:UIAlertControllerStyleAlert];
-            [warn addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
-            [warn addAction:[UIAlertAction actionWithTitle:TR(@"Browser_Str_Force_Write") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a2) {
-                [weakSelf writeStr:newVal toItem:item indexPath:indexPath];
-            }]];
-            [weakSelf presentViewController:warn animated:YES completion:nil];
-        } else {
-            [weakSelf writeStr:newVal toItem:item indexPath:indexPath];
-        }
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:TR(@"Btn_Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (void)writeStr:(NSString *)newVal toItem:(VMScanResultItem *)item indexPath:(NSIndexPath *)indexPath {
-    const char *cstr = [newVal UTF8String];
-    NSUInteger writeLen = strlen(cstr) + 1;
-    NSMutableData *data = [NSMutableData dataWithBytes:cstr length:writeLen];
-    [[VMMemoryEngine shared] writeRawData:data toAddress:item.address];
-
-    item.valueStr = newVal;
-    item.originalSize = writeLen - 1;
-    [self.tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
 }
 
 - (void)showPointerOffsetJumpAlert:(uint64_t)currentAddr {

@@ -150,6 +150,14 @@ NSNotificationName const VMLockEngineStateChangedNotification = @"VMLockEngineSt
                  value:(NSString *)value
                   type:(int)dataType
                   note:(NSString *)note {
+    [self addAddressLock:address value:value type:dataType note:note stringEncoding:VMStringEncodingUTF8];
+}
+
+- (void)addAddressLock:(uint64_t)address
+                 value:(NSString *)value
+                  type:(int)dataType
+                  note:(NSString *)note
+        stringEncoding:(VMStringEncoding)encoding {
     
     VMMemoryEngine *eng = [VMMemoryEngine shared];
     
@@ -163,9 +171,27 @@ NSNotificationName const VMLockEngineStateChangedNotification = @"VMLockEngineSt
         @"addr": @(address),
         @"val": value ?: @"0",
         @"type": @(dataType),
+        @"stringEncoding": @(encoding),
         @"enabled": @(YES),
         @"note": note ?: @""
     } mutableCopy];
+    if (dataType == VMDataTypeString) {
+        NSString *current = [eng readStringAtAddress:address encoding:encoding maxBytes:8192];
+        NSData *existing = [current dataUsingEncoding:VMFoundationStringEncoding(encoding) allowLossyConversion:NO];
+        // Capture the readable byte span before the lock's first write.
+        NSData *locked = [value dataUsingEncoding:VMFoundationStringEncoding(encoding) allowLossyConversion:NO];
+        NSUInteger capacity = MIN(existing.length, locked.length);
+        NSUInteger unit = encoding == VMStringEncodingUTF8 ? 1 : 2;
+        if (existing && locked && existing.length == locked.length && capacity + unit <= 8192) {
+            NSData *ending = [eng readRawMemory:address + capacity length:unit];
+            const uint8_t *bytes = (const uint8_t *)ending.bytes;
+            if (ending.length == unit && bytes[0] == 0 && (unit == 1 || bytes[1] == 0)) {
+                capacity += unit;
+                lockItem[@"stringTerminatorBytes"] = @(unit);
+            }
+        }
+        lockItem[@"stringByteCapacity"] = @(capacity);
+    }
     
     if (!eng.lockedItems) {
         eng.lockedItems = [NSMutableArray array];
@@ -413,7 +439,8 @@ NSNotificationName const VMLockEngineStateChangedNotification = @"VMLockEngineSt
 #pragma mark - 核心锁定循环
 
 - (void)executeLockCycle {
-    mach_port_t task = [VMMemoryEngine shared].targetTask;
+    VMMemoryEngine *eng = [VMMemoryEngine shared];
+    mach_port_t task = eng.targetTask;
     if (task == MACH_PORT_NULL) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [self stopEngine];
@@ -431,12 +458,14 @@ NSNotificationName const VMLockEngineStateChangedNotification = @"VMLockEngineSt
         NSString *val = item[@"val"];
         VMDataType type = (VMDataType)[item[@"type"] intValue];
         
-        [[VMMemoryEngine shared] writeAddress:addr value:val type:type];
+        BOOL success = type == VMDataTypeString
+            ? [self writeStringLockItem:item value:val]
+            : [eng writeAddress:addr value:val type:type];
         
         os_unfair_lock_lock(&_stateLock);
         VMLockItemState *state = self.addressStates[@(addr)];
         if (state) {
-            state.lastWriteSuccess = YES;
+            state.lastWriteSuccess = success;
             state.lastWriteTime = now;
         }
         os_unfair_lock_unlock(&_stateLock);
@@ -493,17 +522,46 @@ NSNotificationName const VMLockEngineStateChangedNotification = @"VMLockEngineSt
 
 #pragma mark - 即时写入
 
+- (BOOL)writeStringLockItem:(NSDictionary *)item value:(NSString *)value {
+    if (!item) return NO;
+    VMMemoryEngine *engine = [VMMemoryEngine shared];
+    uint64_t address = [item[@"addr"] unsignedLongLongValue];
+    VMStringEncoding encoding = (VMStringEncoding)[item[@"stringEncoding"] unsignedIntegerValue];
+    NSNumber *capacity = item[@"stringByteCapacity"];
+    if (!capacity) {
+        // Compatibility for address locks created before encoding metadata.
+        NSString *current = [engine readStringAtAddress:address encoding:encoding maxBytes:8192];
+        NSData *existing = [current dataUsingEncoding:VMFoundationStringEncoding(encoding) allowLossyConversion:NO];
+        if (!existing) return NO;
+        capacity = @(existing.length);
+        if ([item isKindOfClass:NSMutableDictionary.class])
+            ((NSMutableDictionary *)item)[@"stringByteCapacity"] = capacity;
+    }
+    NSUInteger terminator = [item[@"stringTerminatorBytes"] unsignedIntegerValue];
+    if (terminator > capacity.unsignedIntegerValue ||
+        [value lengthOfBytesUsingEncoding:VMFoundationStringEncoding(encoding)] > capacity.unsignedIntegerValue - terminator)
+        return NO;
+    return [engine writeStringAtAddress:address value:value encoding:encoding byteCapacity:capacity.unsignedIntegerValue];
+}
+
 - (void)executeImmediateWrite:(uint64_t)address value:(NSString *)value type:(int)dataType {
     if ([VMMemoryEngine shared].targetTask == MACH_PORT_NULL) return;
-    
-    [[VMMemoryEngine shared] writeAddress:address
-                                    value:value
-                                     type:(VMDataType)dataType];
+    VMMemoryEngine *engine = [VMMemoryEngine shared];
+    NSDictionary *lockItem = nil;
+    for (NSDictionary *item in engine.lockedItems) {
+        if ([item[@"addr"] unsignedLongLongValue] == address) {
+            lockItem = item;
+            break;
+        }
+    }
+    BOOL success = dataType == VMDataTypeString
+        ? [self writeStringLockItem:lockItem value:value]
+        : [engine writeAddress:address value:value type:(VMDataType)dataType];
     
     os_unfair_lock_lock(&_stateLock);
     VMLockItemState *state = self.addressStates[@(address)];
     if (state) {
-        state.lastWriteSuccess = YES;
+        state.lastWriteSuccess = success;
         state.lastWriteTime = [[NSDate date] timeIntervalSince1970];
     }
     os_unfair_lock_unlock(&_stateLock);

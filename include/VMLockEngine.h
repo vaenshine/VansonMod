@@ -2,6 +2,7 @@
 #define VMLockEngine_h
 
 #import <Foundation/Foundation.h>
+#import "VMMemoryEngine.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -43,6 +44,11 @@ typedef NS_ENUM(NSInteger, VMLockItemType) {
                  value:(NSString *)value
                   type:(int)dataType
                   note:(nullable NSString *)note;
+- (void)addAddressLock:(uint64_t)address
+                 value:(NSString *)value
+                  type:(int)dataType
+                  note:(nullable NSString *)note
+        stringEncoding:(VMStringEncoding)encoding;
 
 - (void)removeAddressLock:(uint64_t)address;
 

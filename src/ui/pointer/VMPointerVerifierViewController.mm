@@ -717,13 +717,13 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   UITextField *noteField = [form addTextFieldWithLabel:TR(@"Lab_Note_Colon") value:defaultNote placeholder:TR(@"Placeholder_Note") keyboardType:UIKeyboardTypeDefault];
   UITextField *valueField = [form addTextFieldWithLabel:TR(@"Lab_Value_Colon") value:chain.runtimeValue ?: @"0" placeholder:TR(@"Mod_Input_Value_Placeholder") keyboardType:UIKeyboardTypeNumbersAndPunctuation];
   [form addSectionWithTitle:TR(@"Value_Type")];
-  UISegmentedControl *types = [[UISegmentedControl alloc] initWithItems:@[TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"), @"U8", @"U16", @"U32", @"U64", TR(@"Type_F32"), TR(@"Type_F64"), @"Str"]];
+  UISegmentedControl *types = [[VMScrollableSegmentedControl alloc] initWithItems:@[TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"), @"U8", @"U16", @"U32", @"U64", TR(@"Type_F32"), TR(@"Type_F64"), @"Str"]];
   static const VMDataType verificationTypes[] = {VMDataTypeInt8, VMDataTypeInt16, VMDataTypeInt32, VMDataTypeInt64, VMDataTypeFloat, VMDataTypeDouble};
   NSInteger selection = self.typeSegment.selectedSegmentIndex;
   types.selectedSegmentIndex = selection >= 0 && selection < 6 ? verificationTypes[selection] : VMDataTypeInt32;
   types.accessibilityLabel = TR(@"Value_Type");
   types.translatesAutoresizingMaskIntoConstraints = NO;
-  UIScrollView *typeScroll = [UIScrollView new];
+  UIScrollView *typeScroll = [VMControlStripScrollView new];
   typeScroll.showsHorizontalScrollIndicator = NO;
   [typeScroll addSubview:types];
   [NSLayoutConstraint activateConstraints:@[

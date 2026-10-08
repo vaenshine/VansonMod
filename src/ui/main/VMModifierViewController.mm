@@ -15,6 +15,7 @@
 #include <sys/sysctl.h>
 extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 #define TR(key) ([[VMLocalization shared] localizedString:key])
+
 @interface VMModifierViewController () <
     UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
 @property(nonatomic, strong) UIStackView *headerStackView;
@@ -32,6 +33,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 @property(nonatomic, strong) UIButton *resetBtn;
 @property(nonatomic, strong) UISegmentedControl *dataTypeSegment;
 @property(nonatomic, strong) UISegmentedControl *searchModeSegment;
+@property(nonatomic, strong) UIStackView *stringOptionsStack;
+@property(nonatomic, strong) UISegmentedControl *stringEncodingSegment;
+@property(nonatomic, strong) UISwitch *stringCaseSwitch;
+@property(nonatomic, strong) UILabel *stringOptionsHint;
 @property(nonatomic, strong) UISegmentedControl *fuzzySegRow1;
 @property(nonatomic, strong) UISegmentedControl *fuzzySegRow2;
 @property(nonatomic, strong) UITableView *tableView;
@@ -235,6 +240,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     [self.tableView reloadData];
     [self updateResultInfo];
     [self updateEmptyState];
+    [self updateButtonStates];
   }
 }
 
@@ -315,7 +321,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (UIScrollView *)horizontalStripForView:(UIView *)content minimumWidth:(CGFloat)width height:(CGFloat)height {
-  UIScrollView *scroll = [UIScrollView new];
+  UIScrollView *scroll = [VMControlStripScrollView new];
   scroll.showsHorizontalScrollIndicator = NO;
   scroll.showsVerticalScrollIndicator = NO;
   scroll.alwaysBounceHorizontal = YES;
@@ -407,6 +413,11 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.inputField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
   self.inputField.delegate = self;
   self.inputField.returnKeyType = UIReturnKeySearch;
+  self.inputField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+  self.inputField.autocorrectionType = UITextAutocorrectionTypeNo;
+  self.inputField.spellCheckingType = UITextSpellCheckingTypeNo;
+  self.inputField.smartQuotesType = UITextSmartQuotesTypeNo;
+  self.inputField.smartDashesType = UITextSmartDashesTypeNo;
   [self.inputField addTarget:self action:@selector(updateButtonStates) forControlEvents:UIControlEventEditingChanged];
   [self addDoneButtonTo:self.inputField];
 
@@ -422,7 +433,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [searchRow addArrangedSubview:self.searchBtn];
   [self.headerMainStack addArrangedSubview:searchRow];
 
-  self.dataTypeSegment = [[UISegmentedControl alloc]
+  self.dataTypeSegment = [[VMScrollableSegmentedControl alloc]
       initWithItems:@[ @"I8", @"I16", @"I32", @"I64", @"U8", @"U16", @"U32", @"U64", @"F32", @"F64", @"Str" ]];
   self.dataTypeSegment.selectedSegmentIndex = 2; 
   [self.dataTypeSegment addTarget:self
@@ -433,6 +444,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [self.dataTypeSegment setTitleTextAttributes:@{NSFontAttributeName: [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightSemibold]} forState:UIControlStateNormal];
   self.dataTypeSegment.accessibilityLabel = TR(@"Lock_Select_Type_Title");
   [self.headerMainStack addArrangedSubview:[self horizontalStripForView:self.dataTypeSegment minimumWidth:550 height:44]];
+  [self.headerMainStack addArrangedSubview:[self buildStringSearchOptions]];
 
   self.fuzzySegRow1 = [[UISegmentedControl alloc] initWithItems:@[
     TR(@"Fuz_Increased"), TR(@"Fuz_Decreased"), TR(@"Fuz_Unchanged"),
@@ -508,6 +520,92 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [self.headerMainStack addArrangedSubview:self.statusLabel];
 
   return wrapper;
+}
+
+- (UIStackView *)buildStringSearchOptions {
+  self.stringOptionsStack = [[UIStackView alloc] init];
+  self.stringOptionsStack.axis = UILayoutConstraintAxisVertical;
+  self.stringOptionsStack.spacing = 6;
+  self.stringOptionsStack.hidden = YES;
+
+  self.stringEncodingSegment = [[UISegmentedControl alloc]
+      initWithItems:@[ @"UTF-8", @"UTF-16 LE", @"UTF-16 BE" ]];
+  self.stringEncodingSegment.accessibilityLabel = TR(@"Search_Str_Encoding");
+  [self.stringEncodingSegment setTitleTextAttributes:
+      @{NSFontAttributeName: [VMUIHelper scaledFontOfSize:13 weight:UIFontWeightSemibold]}
+                                            forState:UIControlStateNormal];
+  NSLayoutConstraint *encodingHeight =
+      [self.stringEncodingSegment.heightAnchor constraintEqualToConstant:40];
+  encodingHeight.priority = 999;
+  encodingHeight.active = YES;
+  [self.stringEncodingSegment addTarget:self action:@selector(stringSearchOptionsChanged)
+                       forControlEvents:UIControlEventValueChanged];
+  [self.stringOptionsStack addArrangedSubview:self.stringEncodingSegment];
+
+  UILabel *caseLabel = [[UILabel alloc] init];
+  caseLabel.text = TR(@"Search_Str_CaseSensitive");
+  caseLabel.font = [VMUIHelper scaledFontOfSize:14 weight:UIFontWeightMedium];
+  caseLabel.textColor = UIColor.labelColor;
+  caseLabel.numberOfLines = 0;
+  self.stringCaseSwitch = [[UISwitch alloc] init];
+  self.stringCaseSwitch.onTintColor = [VMUIHelper accentColor];
+  self.stringCaseSwitch.accessibilityLabel = caseLabel.text;
+  [self.stringCaseSwitch addTarget:self action:@selector(stringSearchOptionsChanged)
+                 forControlEvents:UIControlEventValueChanged];
+  UIStackView *caseRow = [[UIStackView alloc] initWithArrangedSubviews:
+      @[caseLabel, self.stringCaseSwitch]];
+  caseRow.alignment = UIStackViewAlignmentCenter;
+  caseRow.spacing = 12;
+  [self.stringOptionsStack addArrangedSubview:caseRow];
+
+  self.stringOptionsHint = [[UILabel alloc] init];
+  self.stringOptionsHint.font = [VMUIHelper scaledFontOfSize:12 weight:UIFontWeightRegular];
+  self.stringOptionsHint.textColor = UIColor.secondaryLabelColor;
+  self.stringOptionsHint.numberOfLines = 0;
+  [self.stringOptionsStack addArrangedSubview:self.stringOptionsHint];
+
+  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+  NSInteger encoding = [defaults integerForKey:@"VMStringSearchEncoding"];
+  self.stringEncodingSegment.selectedSegmentIndex =
+      encoding >= VMStringEncodingUTF8 && encoding <= VMStringEncodingUTF16BE
+          ? encoding : VMStringEncodingUTF8;
+  self.stringCaseSwitch.on = [defaults objectForKey:@"VMStringSearchCaseSensitive"]
+      ? [defaults boolForKey:@"VMStringSearchCaseSensitive"] : YES;
+  return self.stringOptionsStack;
+}
+
+- (void)syncStringSearchOptionsFromEngine {
+  VMMemoryEngine *engine = VMMemoryEngine.shared;
+  self.stringEncodingSegment.selectedSegmentIndex = engine.stringEncoding;
+  self.stringCaseSwitch.on = engine.stringCaseSensitive;
+}
+
+- (void)updateStringSearchOptions {
+  if (!self.stringOptionsStack) return;
+  BOOL visible = self.searchModeSegment.selectedSegmentIndex == VMSearchModeExact &&
+      self.dataTypeSegment.selectedSegmentIndex == VMDataTypeString;
+  self.stringOptionsStack.hidden = !visible;
+  VMMemoryEngine *engine = VMMemoryEngine.shared;
+  BOOL hasResults = engine.resultCount > 0;
+  if (hasResults && engine.currentDataType == VMDataTypeString) {
+    [self syncStringSearchOptionsFromEngine];
+  }
+  BOOL locked = self.isScanning || self.isNextScan || hasResults;
+  self.stringEncodingSegment.enabled = !locked;
+  self.stringCaseSwitch.enabled = !locked;
+  self.stringOptionsHint.text = (self.isNextScan || hasResults)
+      ? TR(@"Search_Str_Reset_Hint") : TR(@"Search_Str_Case_Hint");
+}
+
+- (void)stringSearchOptionsChanged {
+  if (self.isScanning || self.isNextScan || VMMemoryEngine.shared.resultCount > 0) {
+    [self updateStringSearchOptions];
+    return;
+  }
+  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+  [defaults setInteger:self.stringEncodingSegment.selectedSegmentIndex
+                forKey:@"VMStringSearchEncoding"];
+  [defaults setBool:self.stringCaseSwitch.on forKey:@"VMStringSearchCaseSensitive"];
 }
 
 - (UIButton *)createTextOnlyBtn:(NSString *)title color:(UIColor *)color sel:(SEL)sel {
@@ -747,6 +845,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (void)updateButtonStates {
+  [self updateStringSearchOptions];
   NSUInteger resultCount = [VMMemoryEngine shared].resultCount;
   BOOL hasResults = (resultCount > 0);
 
@@ -756,7 +855,13 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   self.btnRefresh.alpha = 1.0;
 
   self.btnNearby.enabled = canOperate;
-  self.btnFilter.enabled = canOperate;
+  BOOL stringResults = self.dataTypeSegment.selectedSegmentIndex == VMDataTypeString ||
+      [VMMemoryEngine shared].currentDataType == VMDataTypeString;
+  self.btnFilter.enabled = canOperate && !stringResults;
+  if (stringResults) {
+    self.filterPanelView.hidden = YES;
+    [VMUIHelper styleButton:self.btnFilter primary:NO];
+  }
   self.btnBatch.enabled = canOperate;
 
   self.btnNearby.alpha = 1.0;
@@ -1353,6 +1458,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (void)toggleFilterPanel {
+  if (self.dataTypeSegment.selectedSegmentIndex == VMDataTypeString ||
+      VMMemoryEngine.shared.currentDataType == VMDataTypeString) return;
   BOOL shouldShow = self.filterPanelView.hidden;
   self.filterPanelView.hidden = !shouldShow;
 
@@ -1384,6 +1491,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (void)applyFilter {
+  if (self.dataTypeSegment.selectedSegmentIndex == VMDataTypeString ||
+      VMMemoryEngine.shared.currentDataType == VMDataTypeString) return;
   [self.view endEditing:YES];
   VMFilterMode mode;
   NSString *v1 = self.tfFilter1.text;
@@ -1463,6 +1572,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
   [self updateGroupHelpButtonState:showIcon];
 
   [self.inputField reloadInputViews];
+  [self updateButtonStates];
+  [self updateTableHeaderHeight:self.tableView.tableHeaderView];
 }
 
 - (void)performPointerSearch:(uint64_t)targetAddress {
@@ -1603,6 +1714,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                   [self showWeakToast:TR(@"Title_Scan_Complete")];
                   
                   self.isNextScan = YES;
+                  [self updateStringSearchOptions];
                   [self.searchBtn setTitle:TR(@"Mod_Search_Next") forState:UIControlStateNormal];
                   self.btnNearby.hidden = NO;
                   self.fuzzySegRow1.hidden = NO;
@@ -1746,6 +1858,11 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
         return;
       }
     }
+  }
+
+  if (!self.isNextScan && type == VMDataTypeString && mode == VMSearchModeExact) {
+    eng.stringEncoding = (VMStringEncoding)self.stringEncodingSegment.selectedSegmentIndex;
+    eng.stringCaseSensitive = self.stringCaseSwitch.on;
   }
 
   UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc]
@@ -1992,6 +2109,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                   [self showWeakToast:TR(@"Title_Scan_Complete")];
 
                   self.isNextScan = YES;
+                  [self updateStringSearchOptions];
                   [self.searchBtn setTitle:TR(@"Mod_Search_Next")
                                   forState:UIControlStateNormal];
                   self.btnNearby.hidden = NO;
@@ -2523,8 +2641,21 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
           forState:UIControlStateNormal];
 }
 
+- (BOOL)batchItemsRequireStringEditor:(NSArray<VMScanResultItem *> *)items {
+  if (self.dataTypeSegment.selectedSegmentIndex == VMDataTypeString ||
+      VMMemoryEngine.shared.currentDataType == VMDataTypeString) return YES;
+  for (VMScanResultItem *item in items) {
+    if (item.type == VMDataTypeString) return YES;
+  }
+  return NO;
+}
+
 - (void)batchModifyAction {
   NSArray<VMScanResultItem *> *items = [self batchModificationItems];
+  if ([self batchItemsRequireStringEditor:items]) {
+    [self showToast:TR(@"Str_Use_Editor_Hint")];
+    return;
+  }
   if (items && items.count == 0) {
     [self showToast:TR(@"Msg_No_Sel")];
     return;
@@ -2580,6 +2711,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 }
 
 - (void)showBatchInputMode:(int)mode items:(NSArray *)items {
+  if ([self batchItemsRequireStringEditor:items]) {
+    [self showToast:TR(@"Str_Use_Editor_Hint")];
+    return;
+  }
   NSString *title = (mode == 0) ? TR(@"Mod_Batch_Fixed") : TR(@"Title_Inc_Val");
   UIAlertController *alert =
       [UIAlertController alertControllerWithTitle:title
@@ -2635,14 +2770,15 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     VMScanResultItem *itm = [self getItemAtIndexPath:p];
     if (itm) {
       VMDataType type = itm.type;
-      if (type < VMDataTypeInt8 || type > VMDataTypeDouble) {
+      if (type < VMDataTypeInt8 || type > VMDataTypeString) {
         type = (VMDataType)self.dataTypeSegment.selectedSegmentIndex;
       }
       NSMutableDictionary *favItem =
           [NSMutableDictionary dictionaryWithDictionary:@{
             @"addr" : @(itm.address),
             @"note" : TR(@"Batch_Fav_Note"),
-            @"type" : @(type)
+            @"type" : @(type),
+            @"stringEncoding" : @(itm.stringEncoding)
           }];
       [[VMFavoriteManager shared]
           addFavorite:favItem
@@ -2672,17 +2808,20 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
         continue;
 
       VMDataType type = itm.type;
-      if (type < VMDataTypeInt8 || type > VMDataTypeDouble) {
+      if (type < VMDataTypeInt8 || type > VMDataTypeString) {
         type = (VMDataType)self.dataTypeSegment.selectedSegmentIndex;
       }
       
-      NSString *val = [[VMMemoryEngine shared] readAddress:itm.address
-                                                      type:type];
+      NSString *val = type == VMDataTypeString
+          ? [[VMMemoryEngine shared] readStringAtAddress:itm.address
+                                              encoding:itm.stringEncoding maxBytes:256]
+          : [[VMMemoryEngine shared] readAddress:itm.address type:type];
       
       [[VMLockEngine shared] addAddressLock:itm.address
                                       value:val ?: @"0"
                                        type:(int)type
-                                       note:TR(@"Batch_Lock_Note")];
+                                       note:TR(@"Batch_Lock_Note")
+                             stringEncoding:itm.stringEncoding];
       [existingAddrs addObject:@(itm.address)];
       count++;
     }
@@ -3013,9 +3152,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       }
     }
     
-    NSString *val = [[VMMemoryEngine shared]
-        readAddress:item.address
-               type:displayType];
+    NSString *val = displayType == VMDataTypeString
+        ? [[VMMemoryEngine shared] readStringAtAddress:item.address
+                                            encoding:item.stringEncoding maxBytes:256]
+        : [[VMMemoryEngine shared] readAddress:item.address type:displayType];
 
     VMDataType currentType = displayType;
     if (currentType != VMDataTypeFloat && currentType != VMDataTypeDouble &&
@@ -3032,11 +3172,14 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     NSString *targetVal = self.inputField.text;
 
     if (mode == VMSearchModeExact) {
-      if (targetVal.length > 0 && val && ![val isEqualToString:targetVal]) {
-        valueColor = [UIColor systemRedColor];
-      } else {
-        valueColor = [UIColor labelColor];
+      BOOL matches = [val isEqualToString:targetVal];
+      if (displayType == VMDataTypeString && targetVal.length > 0 && val) {
+        NSStringCompareOptions options = NSAnchoredSearch;
+        if (![VMMemoryEngine shared].stringCaseSensitive) options |= NSCaseInsensitiveSearch;
+        matches = [val rangeOfString:targetVal options:options].location != NSNotFound;
       }
+      valueColor = targetVal.length > 0 && val && !matches
+          ? UIColor.systemRedColor : UIColor.labelColor;
     } else if (mode == VMSearchModeFuzzy) {
       if (item.valueStr && val && ![val isEqualToString:item.valueStr]) {
         valueColor = [UIColor systemRedColor];
@@ -3093,8 +3236,10 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
     }
   }
 
-  NSString *liveVal = [[VMMemoryEngine shared] readAddress:item.address
-                                                      type:type];
+  NSString *liveVal = type == VMDataTypeString
+      ? [[VMMemoryEngine shared] readStringAtAddress:item.address
+                                          encoding:item.stringEncoding maxBytes:256]
+      : [[VMMemoryEngine shared] readAddress:item.address type:type];
   item.valueStr = liveVal;
 
   [tableView reloadRowsAtIndexPaths:@[ indexPath ]
@@ -3104,6 +3249,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
       showActionSheetForAddress:item.address
                           value:liveVal
                        dataType:type
+                 stringEncoding:item.stringEncoding
              fromViewController:self
                      sourceView:tableView
                      sourceRect:[tableView rectForRowAtIndexPath:indexPath]
@@ -3153,6 +3299,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                             newItem.address = item.address;
                             newItem.valueStr = item.valueStr;
                             newItem.type = item.type;
+                            newItem.stringEncoding = item.stringEncoding;
+                            newItem.originalSize = item.originalSize;
                             [self.pinnedResults addObject:newItem];
                           }
                           [self.tableView reloadData];
@@ -3176,14 +3324,16 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                               type = VMDataTypeInt32;
                             }
                           }
-                          NSString *currVal =
-                              [[VMMemoryEngine shared] readAddress:item.address
-                                                              type:type];
+                          NSString *currVal = type == VMDataTypeString
+                              ? [[VMMemoryEngine shared] readStringAtAddress:item.address
+                                                                  encoding:item.stringEncoding maxBytes:256]
+                              : [[VMMemoryEngine shared] readAddress:item.address type:type];
 
                           [[VMLockEngine shared] addAddressLock:item.address
                                                           value:currVal ?: @"0"
                                                            type:(int)type
-                                                           note:TR(@"App_Title")];
+                                                           note:TR(@"App_Title")
+                                                 stringEncoding:item.stringEncoding];
                           
                           [self showToast:TR(@"Ptr_Lock_Success")];
                           completion(YES);
@@ -3207,6 +3357,7 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                           }
                           [VMMemoryActionSheet showAddToFavAlert:item.address
                                                             type:type
+                                                  stringEncoding:item.stringEncoding
                                                             inVC:self];
                           completion(YES);
                         }];
@@ -3447,6 +3598,18 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                            restoreMemoryTimelineAtIndex:i]) {
                                      self.dataTypeSegment.selectedSegmentIndex =
                                          item.dataType;
+                                     self.isNextScan = YES;
+                                     if (item.dataType == VMDataTypeString) {
+                                       self.searchModeSegment.selectedSegmentIndex = VMSearchModeExact;
+                                       [self.searchModeSegment setEnabled:YES forSegmentAtIndex:VMSearchModeExact];
+                                       [self.dataTypeSegment setEnabled:YES forSegmentAtIndex:VMDataTypeString];
+                                       self.inputField.hidden = NO;
+                                       self.fuzzySegRow1.hidden = YES;
+                                       self.fuzzySegRow2.hidden = YES;
+                                       self.fuzzyHintLabel.hidden = YES;
+                                       [self syncStringSearchOptionsFromEngine];
+                                     }
+                                     [self dataTypeChanged];
                                      [self.tableView reloadData];
                                      [self updateResultInfo];
                                      [self updateEmptyState];
@@ -3577,9 +3740,8 @@ extern "C" int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
                                      VMDataType t =
                                          (VMDataType)self.dataTypeSegment
                                              .selectedSegmentIndex;
-                                     if (t == VMDataTypeString)
-                                       t = VMDataTypeInt32;
                                      vc.type = t;
+                                     vc.stringEncoding = [VMMemoryEngine shared].stringEncoding;
                                      [self.navigationController
                                          pushViewController:vc
                                                    animated:YES];

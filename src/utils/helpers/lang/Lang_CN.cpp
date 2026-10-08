@@ -3,6 +3,11 @@
 
 std::map<std::string, std::string> Lang_CN::getStrings() {
   return {
+    {"Str_Use_Editor_Hint", "请逐条打开字符串编辑器修改文本。"},
+    {"Search_Str_Encoding", "字符串编码"},
+    {"Search_Str_CaseSensitive", "区分大小写"},
+    {"Search_Str_Reset_Hint", "重置搜索后可更改编码和大小写选项。"},
+    {"Search_Str_Case_Hint", "关闭后按 Unicode 忽略大小写匹配。"},
     {"Act_Import", "导入"},
     {"Set_Auto_Saved", "设置会自动保存"},
     {"Set_Search_Section", "搜索参数"},
@@ -21,10 +26,10 @@ std::map<std::string, std::string> Lang_CN::getStrings() {
     {"Btn_Cancel", "取消"},
     {"Str_Target_Changed", "目标已切换或断开，请重新打开编辑器。"},
     {"Str_Read_Failed", "内存读取不完整，地址可能已失效。"},
-    {"Str_Not_Text", "该地址开头无法识别 UTF-8 字符串，可使用范围编辑查看原始字节。"},
+    {"Str_Not_Text", "该地址开头无法按所选编码识别字符串，可使用范围编辑查看原始字节。"},
     {"Str_Invalid_Range", "请输入十六进制起止地址（包含终点），范围最多 8192 字节。"},
     {"Str_Context_Limit", "前后文已达到 64 KB 上限。切换到附近字符串后重新加载可重设中心。"},
-    {"Str_Invalid_Text", "文本或转义格式无效。范围模式支持 \\\\、\\0、\\n、\\r、\\t、\\xNN；单条模式要求正文中无空字节。"},
+    {"Str_Invalid_Text", "文本与所选编码不兼容或转义格式无效。范围模式支持 \\\\, \\0, \\n, \\r, \\t, \\xNN；单条模式中的 U+0000 仅用作结束符。"},
     {"Str_Equal_Length", "要求修改前后字节数相等"},
     {"Str_Too_Long", "修改内容超过原始字节长度。扩大写入边界需要明确选择范围。"},
     {"Str_Conflict", "目标内存已发生变化，本次写入已阻止。请重新加载确认最新内容。"},

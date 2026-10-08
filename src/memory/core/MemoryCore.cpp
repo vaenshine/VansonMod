@@ -2,10 +2,12 @@
 #define MemoryCore_cpp
 
 #include "MemoryCore.hpp"
+#include "StringSearch.hpp"
 #include "../../utils/managers/StorageCore.hpp"
 #include <algorithm>
 #include <arm_neon.h>
 #include <atomic>
+#include <cerrno>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -18,6 +20,7 @@
 
 #include <sstream>
 #include <sys/sysctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 extern "C" {
@@ -687,6 +690,8 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
                                          const std::string &valueStr,
                                          int searchMode, uint64_t start,
                                          uint64_t end) {
+  const StringSearchPattern stringPattern(
+      type == DataType::String ? valueStr : std::string(), getStringSearchOptions());
   _resultCount = 0;
   std::vector<ScanResult> emptyRes;
   if (_task == MACH_PORT_NULL || _storagePath.empty())
@@ -694,10 +699,14 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
   FILE *outFile = fopen(_storagePath.c_str(), "wb");
   if (!outFile)
     return emptyRes;
+  if (type == DataType::String && !stringPattern.valid()) {
+    fclose(outFile);
+    return emptyRes;
+  }
 
   vm_map_size_t size = 0;
 
-  int sMode = (int)searchMode;
+  int sMode = type == DataType::String ? 0 : (int)searchMode;
   
   uint64_t endAddress = end;
   if (endAddress == 0) {
@@ -836,8 +845,6 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
     bool groupLayoutModeLocal = groupUsesLayoutMode(gItemsCopy);
     
     bool isStringType = (dType == DataType::String);
-    std::string targetString = valueStr;
-    size_t targetStringLen = targetString.length();
     
     float targetFloat = target.f;
     double targetDouble = target.d;
@@ -907,7 +914,8 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
           uint64_t rEnd = std::min(r.start + r.size, endAddress);
           const size_t chunkBufferSize = 1024 * 1024;
           // The extra bytes complete a value whose start belongs to this block.
-          uint8_t *memBuffer = (uint8_t *)malloc(chunkBufferSize + 7);
+          const size_t lookahead = isStringType ? stringPattern.maxByteLength() - 1 : 7;
+          uint8_t *memBuffer = (uint8_t *)malloc(chunkBufferSize + lookahead);
           if (!memBuffer)
             return;
 
@@ -916,8 +924,7 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
           DataType alignmentType = dType;
           DataType strideType = dType;
           size_t step = getScanStep(dType);
-          size_t scanItemSize = isStringType && targetStringLen > 0
-                                    ? targetStringLen : dataSizeLocal;
+          size_t scanItemSize = isStringType ? stringPattern.minByteLength() : dataSizeLocal;
           if (searchModeLocal == 2 && !gItemsCopy.empty()) {
             alignmentType = gItemsCopy[0].type;
             strideType = alignmentType;
@@ -942,8 +949,8 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
           GroupScanReader groupReader(task, r.start, rEnd);
           while (curr < rEnd) {
             const size_t chunkSize = std::min<uint64_t>(chunkBufferSize, rEnd - curr);
-            const size_t requestedSize = chunkSize + (packedInteger
-                ? std::min<uint64_t>(7, rEnd - curr - chunkSize) : 0);
+            const size_t requestedSize = chunkSize + (packedInteger || isStringType
+                ? std::min<uint64_t>(lookahead, rEnd - curr - chunkSize) : 0);
             mach_vm_size_t readSize = 0;
             if (mach_vm_read_overwrite(task, curr, requestedSize,
                                        (mach_vm_address_t)memBuffer,
@@ -954,6 +961,14 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
               groupReader.setBlock(curr, memBuffer, readSize);
 
               for (size_t k = 0; k <= limit; k += step) {
+                if (isStringType && stringPattern.caseSensitive() &&
+                    memBuffer[k + stringPattern.anchorOffset()] != stringPattern.anchorByte()) {
+                  const uint8_t *candidate = static_cast<const uint8_t *>(
+                      memchr(memBuffer + k + stringPattern.anchorOffset(),
+                             stringPattern.anchorByte(), limit - k + 1));
+                  if (!candidate) break;
+                  k = static_cast<size_t>(candidate - memBuffer) - stringPattern.anchorOffset();
+                }
                 if (searchModeLocal == 0 && packedInteger &&
                     memBuffer[k] != (uint8_t)targetUInt64) {
                   // Full-width equality (including I64's pointer mask) requires
@@ -1008,12 +1023,8 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
                 } else { 
                   
                   if (isStringType) {
-                    if (targetStringLen > 0 && k + targetStringLen <= readSize) {
-                      if (memcmp(ptr, targetString.c_str(), targetStringLen) == 0) {
-                        match = true;
-                        valBits = 0; 
-                      }
-                    }
+                    valBits = stringPattern.match(memBuffer + k, readSize - k);
+                    match = valBits > 0;
                   } else if (isFloatTypeLocal) {
                     double v = isFloat ? (double)(*(float *)ptr)
                                        : *(double *)ptr;
@@ -1102,6 +1113,8 @@ std::vector<ScanResult> MemoryCore::scan(DataType type,
 std::vector<ScanResult>
 MemoryCore::nextScan(const std::vector<ScanResult> &ignored, DataType type,
                      const std::string &valueStr, int searchMode) {
+  const StringSearchPattern stringPattern(
+      type == DataType::String ? valueStr : std::string(), getStringSearchOptions());
   std::vector<ScanResult> emptyRes;
   
   if (_task == MACH_PORT_NULL)
@@ -1109,6 +1122,9 @@ MemoryCore::nextScan(const std::vector<ScanResult> &ignored, DataType type,
   
   if (_resultCount == 0 || _storagePath.empty() || _swapPath.empty())
     return emptyRes;
+  // Invalid text is a rejected operation; retain the previous results for retry.
+  if (type == DataType::String && !stringPattern.valid())
+    return getResults(0, 100);
 
   FILE *inFileVerify = fopen(_storagePath.c_str(), "rb");
   if (!inFileVerify)
@@ -1123,7 +1139,8 @@ MemoryCore::nextScan(const std::vector<ScanResult> &ignored, DataType type,
   bool useIncrementalOptimization = false;
   std::vector<DiffRegion> diffRegions;
   
-  if (hasBaselineSnapshot() && (searchMode == 0 || searchMode == 1 || searchMode == 5)) {
+  if (type != DataType::String && hasBaselineSnapshot() &&
+      (searchMode == 0 || searchMode == 1 || searchMode == 5)) {
     
     diffRegions = compareWithBaseline(8);
     if (!diffRegions.empty()) {
@@ -1155,8 +1172,6 @@ MemoryCore::nextScan(const std::vector<ScanResult> &ignored, DataType type,
   }
   
   bool isStringType = (type == DataType::String);
-  std::string targetString = valueStr;
-  size_t targetStringLen = targetString.length();
 
   std::atomic<size_t> newCount(0);
   mach_port_t task = _task;
@@ -1215,7 +1230,8 @@ MemoryCore::nextScan(const std::vector<ScanResult> &ignored, DataType type,
           uint64_t cachedPage = (uint64_t)-1;
           uint8_t pageBuffer[4096];
           
-          uint8_t stringBuffer[64];
+          std::vector<uint8_t> stringBuffer(isStringType ? stringPattern.maxByteLength() : 0);
+          uint64_t stringRegionStart = 0, stringRegionEnd = 0;
 
           for (size_t i = startIdx; i < endIdx; ++i) {
             const RawResult &raw = batchPtr[i];
@@ -1238,41 +1254,31 @@ MemoryCore::nextScan(const std::vector<ScanResult> &ignored, DataType type,
             uint8_t buf[8] = {};
             
             if (isStringType) {
-              mach_vm_size_t rSz = 64;
-              if (mach_vm_read_overwrite(task, raw.address, 64,
-                                         (mach_vm_address_t)stringBuffer,
-                                         &rSz) == KERN_SUCCESS) {
-                bool match = false;
-                if (targetStringLen > 0) {
-                  
-                  char *strPtr = (char *)stringBuffer;
-                  size_t maxLen = rSz;
-                  
-                  size_t actualLen = 0;
-                  while (actualLen < maxLen && strPtr[actualLen] != '\0') actualLen++;
-                  if (actualLen == 0) actualLen = maxLen;
-                  
-                  if (actualLen >= targetStringLen) {
-                    for (size_t j = 0; j <= actualLen - targetStringLen; ++j) {
-                      if (memcmp(strPtr + j, targetString.c_str(), targetStringLen) == 0) {
-                        match = true;
-                        break;
-                      }
-                    }
-                  }
-                } else {
-                  
-                  match = true;
-                }
-                
-                if (match) {
-                  RawResult resSub;
-                  resSub.address = raw.address;
-                  resSub.value = 0;
-                  resSub.type = raw.type;  
-                  memset(resSub.padding, 0, sizeof(resSub.padding));
-                  localBuffer.push_back(resSub);
-                }
+              if (raw.type != static_cast<uint8_t>(DataType::String)) continue;
+              if (raw.address < stringRegionStart || raw.address >= stringRegionEnd) {
+                mach_vm_address_t regionAddress = raw.address;
+                mach_vm_size_t regionSize = 0;
+                uint32_t regionDepth = 0;
+                mach_msg_type_number_t regionCount = VM_REGION_SUBMAP_INFO_COUNT_64;
+                vm_region_submap_info_data_64_t regionInfo = {};
+                if (mach_vm_region_recurse(task, &regionAddress, &regionSize, &regionDepth,
+                    reinterpret_cast<vm_region_recurse_info_t>(&regionInfo), &regionCount) != KERN_SUCCESS ||
+                    !(regionInfo.protection & VM_PROT_READ) || regionAddress > raw.address ||
+                    regionSize > UINT64_MAX - regionAddress ||
+                    raw.address - regionAddress >= regionSize) continue;
+                stringRegionStart = regionAddress;
+                stringRegionEnd = regionAddress + regionSize;
+              }
+              const size_t requestedSize = std::min<uint64_t>(
+                  stringBuffer.size(), stringRegionEnd - raw.address);
+              mach_vm_size_t readSize = 0;
+              if (mach_vm_read_overwrite(task, raw.address, requestedSize,
+                                         reinterpret_cast<mach_vm_address_t>(stringBuffer.data()),
+                                         &readSize) == KERN_SUCCESS) {
+                const size_t matchedLength = stringPattern.match(
+                    stringBuffer.data(), std::min<uint64_t>(readSize, requestedSize));
+                if (matchedLength)
+                  localBuffer.push_back(makeRawResult(raw.address, matchedLength, DataType::String));
               }
               continue; 
             }
@@ -1504,16 +1510,25 @@ bool MemoryCore::restoreResultsFromFile(const std::string &filePath,
                                         size_t resultCount) {
   if (_storagePath.empty())
     return false;
-
-  std::remove(_storagePath.c_str());
-  if (filePath.empty() || resultCount == 0) {
+  if (filePath.empty()) {
+    if (resultCount != 0) return false;
+    if (std::remove(_storagePath.c_str()) != 0 && errno != ENOENT) return false;
     _resultCount = 0;
     return true;
   }
-
-  if (std::rename(filePath.c_str(), _storagePath.c_str()) != 0)
-    return false;
-
+  if (resultCount > SIZE_MAX / sizeof(RawResult)) return false;
+  FILE *source = fopen(filePath.c_str(), "rb");
+  if (!source) return false;
+  struct stat fileInfo = {};
+  const bool valid = fstat(fileno(source), &fileInfo) == 0 &&
+      S_ISREG(fileInfo.st_mode) && fileInfo.st_size >= 0 &&
+      static_cast<uint64_t>(fileInfo.st_size) == resultCount * sizeof(RawResult);
+  fclose(source);
+  if (!valid) return false;
+  // rename replaces atomically and retains both files when it fails. The same
+  // path is an adoption operation after changing the engine's session context.
+  if (filePath != _storagePath &&
+      std::rename(filePath.c_str(), _storagePath.c_str()) != 0) return false;
   _resultCount = resultCount;
   return true;
 }

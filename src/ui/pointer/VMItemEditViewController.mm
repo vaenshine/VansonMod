@@ -96,13 +96,13 @@
   [self draftField:@"note" value:[self.model valueForKey:@"note"] numeric:NO editable:YES];
   [self draftField:@"author" value:[self.model valueForKey:@"author"] numeric:NO editable:!imported];
   if ([self.model isKindOfClass:VMPointerChain.class] || [self.model isKindOfClass:VMSignatureModel.class]) {
-    self.typeSegment = [[UISegmentedControl alloc] initWithItems:@[TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"), @"U8", @"U16", @"U32", @"U64", TR(@"Type_F32"), TR(@"Type_F64"), @"Str"]];
+    self.typeSegment = [[VMScrollableSegmentedControl alloc] initWithItems:@[TR(@"Type_I8"), TR(@"Type_I16"), TR(@"Type_I32"), TR(@"Type_I64"), @"U8", @"U16", @"U32", @"U64", TR(@"Type_F32"), TR(@"Type_F64"), @"Str"]];
     NSInteger type = [[self.model valueForKey:@"lockType"] integerValue];
     self.typeSegment.selectedSegmentIndex = type >= 0 && type <= VMDataTypeString ? type : UISegmentedControlNoSegment;
     self.typeSegment.accessibilityLabel = TR(@"Value_Type");
     [self.typeSegment addTarget:self action:@selector(onTypeChange:) forControlEvents:UIControlEventValueChanged];
     self.typeSegment.translatesAutoresizingMaskIntoConstraints = NO;
-    self.typePicker = [UIScrollView new];
+    self.typePicker = [VMControlStripScrollView new];
     self.typePicker.showsHorizontalScrollIndicator = NO;
     [self.typePicker addSubview:self.typeSegment];
     [NSLayoutConstraint activateConstraints:@[

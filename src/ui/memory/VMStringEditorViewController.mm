@@ -191,6 +191,7 @@
   [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardChanged:)
       name:UIKeyboardWillHideNotification object:nil];
 
+  self.session.stringEncoding = self.stringEncoding;
   NSString *error = nil;
   if ([self.session openStringAtAddress:self.initialAddress error:&error]) {
     [self.session loadMoreBefore:YES error:NULL];
@@ -234,9 +235,11 @@
   VMStringMemorySession *s = self.session;
   self.detailLabel.text = s.originalBytes.length ? [NSString stringWithFormat:@"0x%llX – 0x%llX\n%@",
       (unsigned long long)s.address, (unsigned long long)(s.address + s.originalBytes.length - 1),
-      STRING_TEXT(s.rangeMode ? @"Str_Range_Mode" : @"Str_Single_Mode")] : STRING_TEXT(@"Str_Read_Failed");
+      [NSString stringWithFormat:@"%@ · %@",
+          STRING_TEXT(s.rangeMode ? @"Str_Range_Mode" : @"Str_Single_Mode"),
+          s.rangeMode ? @"Raw" : [VMStringMemorySession nameForStringEncoding:s.stringEncoding]]] : STRING_TEXT(@"Str_Read_Failed");
   NSData *bytes = s.rangeMode ? [VMStringMemorySession dataForEscapedText:self.textView.text] :
-      [self.textView.text dataUsingEncoding:NSUTF8StringEncoding];
+      [self.textView.text dataUsingEncoding:s.foundationEncoding];
   NSString *error = nil;
   BOOL valid = s.originalBytes.length && [s dataForDraft:self.textView.text error:&error] != nil;
   NSString *rule = STRING_TEXT(s.rangeMode ? @"Str_Escape_Help" :
@@ -269,7 +272,7 @@
   cell.textLabel.text = [record.text stringByReplacingOccurrencesOfString:@"\n" withString:@" ↵ "];
   cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
   cell.detailTextLabel.text = [NSString stringWithFormat:@"0x%llX · %lu B%@",
-      (unsigned long long)record.address, (unsigned long)(record.bytes.length - (record.terminated ? 1 : 0)),
+      (unsigned long long)record.address, (unsigned long)(record.bytes.length - (record.terminated ? self.session.terminatorByteCount : 0)),
       record.terminated ? @" · \\0" : @""];
   cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
   BOOL selected = self.session.address >= record.address &&

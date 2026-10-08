@@ -3,6 +3,13 @@
 
 std::map<std::string, std::string> Lang_VI::getStrings() {
   return {
+    {"Str_Invalid_Text", "Văn bản không hợp lệ với mã hóa đã chọn hoặc chuỗi thoát không hợp lệ. Chế độ vùng hỗ trợ \\\\, \\0, \\n, \\r, \\t, \\xNN; chế độ một chuỗi dành U+0000 làm ký tự kết thúc."},
+    {"Str_Not_Text", "Không thể đọc chuỗi tại địa chỉ này bằng mã hóa đã chọn. Dùng chế độ vùng để xem byte thô."},
+    {"Str_Use_Editor_Hint", "Mở từng chuỗi trong trình sửa chuỗi để chỉnh sửa văn bản."},
+    {"Search_Str_Encoding", "Mã hóa chuỗi"},
+    {"Search_Str_CaseSensitive", "Phân biệt hoa thường"},
+    {"Search_Str_Reset_Hint", "Đặt lại tìm kiếm để đổi mã hóa hoặc tùy chọn hoa thường."},
+    {"Search_Str_Case_Hint", "Tắt để tìm theo Unicode mà không phân biệt hoa thường."},
     {"Act_Import", "Nhập"},
     {"Set_Auto_Saved", "Thay đổi được lưu tự động"},
     {"Set_Search_Section", "Tham số tìm kiếm"},

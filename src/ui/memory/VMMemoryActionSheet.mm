@@ -15,8 +15,9 @@
 #import "include/VMPointerChain.h"
 #import <objc/message.h>
 #import "VMStringEditorViewController.h"
+#import "VMMemoryActionSheet.h"
 #define TR(key) ([[VMLocalization shared] localizedString:key])
-@interface VMMemoryActionSheet : NSObject
+@interface VMMemoryActionSheet ()
 + (NSUInteger)writeSizeForType:(VMDataType)type
                        oldValue:(NSString *)oldValue
                        newValue:(NSString *)newValue;
@@ -95,6 +96,21 @@
                        sourceView:(UIView *)sourceView
                        sourceRect:(CGRect)sourceRect
                         extraItem:(NSMutableDictionary *)item {
+  [self showActionSheetForAddress:addr value:valStr dataType:type
+                  stringEncoding:VMStringEncodingUTF8 fromViewController:vc
+                      sourceView:sourceView sourceRect:sourceRect extraItem:item];
+}
+
++ (void)showActionSheetForAddress:(uint64_t)addr
+                            value:(NSString *)valStr
+                         dataType:(VMDataType)type
+                   stringEncoding:(VMStringEncoding)encoding
+               fromViewController:(UIViewController *)vc
+                       sourceView:(UIView *)sourceView
+                       sourceRect:(CGRect)sourceRect
+                        extraItem:(NSMutableDictionary *)item {
+  if (type == VMDataTypeString && [item isKindOfClass:NSDictionary.class] && item[@"stringEncoding"])
+    encoding = (VMStringEncoding)[item[@"stringEncoding"] unsignedIntegerValue];
   BOOL isLockListVC = [vc isKindOfClass:[VMLockListViewController class]];
   BOOL isBrowserVC = [vc isKindOfClass:[VMMemoryBrowserViewController class]];
   BOOL isHexVC = [vc isKindOfClass:[VMHexEditorViewController class]];
@@ -180,6 +196,7 @@
                                             [self showModifyAlert:addr
                                                               val:valStr
                                                              type:type
+                                                   stringEncoding:encoding
                                                              inVC:vc];
                                           }]];
 
@@ -296,6 +313,7 @@
                                                [VMMemoryBrowserViewController new];
                                            browser.address = addr;
                                            browser.type = VMDataTypeString;
+                                           browser.stringEncoding = encoding;
                                            [vc.navigationController pushViewController:browser animated:YES];
                                          });
                                    }]];
@@ -345,6 +363,7 @@
                                               [self showAddToLockAlert:addr
                                                                  value:valStr
                                                                   type:type
+                                                        stringEncoding:encoding
                                                                   inVC:vc];
                                             }]];
   }
@@ -355,6 +374,7 @@
                                             handler:^(UIAlertAction *a) {
                                               [self showAddToFavAlert:addr
                                                                  type:type
+                                                       stringEncoding:encoding
                                                                  inVC:vc];
                                             }]];
   }
@@ -387,13 +407,21 @@
                     val:(NSString *)val
                    type:(VMDataType)type
                    inVC:(UIViewController *)vc {
+  [self showModifyAlert:address val:val type:type stringEncoding:VMStringEncodingUTF8 inVC:vc];
+}
+
++ (void)showModifyAlert:(uint64_t)address
+                    val:(NSString *)val
+                   type:(VMDataType)type
+         stringEncoding:(VMStringEncoding)encoding
+                   inVC:(UIViewController *)vc {
 
   [vc.view endEditing:YES];
   pid_t editingPid = [VMMemoryEngine shared].targetPid;
   mach_port_t editingTask = [VMMemoryEngine shared].targetTask;
 
   if (type == VMDataTypeString) {
-    [self showStringModifyAlert:address val:val inVC:vc];
+    [self showStringModifyAlert:address val:val stringEncoding:encoding inVC:vc];
     return;
   }
 
@@ -462,11 +490,28 @@
 
 + (void)showStringModifyAlert:(uint64_t)address
                           val:(NSString *)val
+               stringEncoding:(VMStringEncoding)encoding
                          inVC:(UIViewController *)vc {
   VMMemoryEngine *engine = [VMMemoryEngine shared];
   pid_t pid = engine.targetPid;
   mach_port_t task = engine.targetTask;
   VMStringMemorySession *session = [VMStringMemorySession new];
+  session.stringEncoding = encoding;
+  __weak VMStringMemorySession *weakSession = session;
+  void (^syncStringEntries)(uint64_t, NSString *, VMStringEncoding, NSUInteger, BOOL) =
+      ^(uint64_t addr, NSString *value, VMStringEncoding capturedEncoding, NSUInteger capacity, BOOL terminated) {
+    if (!value || engine.targetPid != pid || engine.targetTask != task) return;
+    for (NSArray *list in @[engine.lockedItems ?: @[], engine.favoriteItems ?: @[]]) {
+      for (NSMutableDictionary *entry in list) {
+        if ([entry[@"addr"] unsignedLongLongValue] != addr ||
+            [entry[@"type"] unsignedIntegerValue] != VMDataTypeString) continue;
+        entry[@"val"] = value;
+        entry[@"stringEncoding"] = @(capturedEncoding);
+        entry[@"stringByteCapacity"] = @(MAX([entry[@"stringByteCapacity"] unsignedIntegerValue], capacity));
+        entry[@"stringTerminatorBytes"] = @(terminated ? (capturedEncoding == VMStringEncodingUTF8 ? 1 : 2) : 0);
+      }
+    }
+  };
   session.targetIsValid = ^BOOL {
     return pid > 0 && task != MACH_PORT_NULL &&
            engine.targetPid == pid && engine.targetTask == task;
@@ -477,31 +522,29 @@
   };
   session.writer = ^BOOL(uint64_t addr, NSData *data) {
     if (engine.targetPid != pid || engine.targetTask != task) return NO;
-    BOOL ok = [engine writeRawData:data toAddress:addr];
-    if (ok) {
-      const uint8_t *bytes = (const uint8_t *)data.bytes;
-      NSUInteger length = 0;
-      while (length < data.length && bytes[length] != 0) length++;
-      NSString *value = [[NSString alloc] initWithBytes:bytes length:length encoding:NSUTF8StringEncoding];
-      if (value) {
-        for (NSMutableDictionary *entry in engine.lockedItems) {
-          if ([entry[@"addr"] unsignedLongLongValue] == addr &&
-              [entry[@"type"] integerValue] == VMDataTypeString) entry[@"val"] = value;
-        }
-      }
-    }
-    return ok;
+    return [engine writeRawData:data toAddress:addr];
   };
   session.didWrite = ^(uint64_t addr, NSData *before, NSData *after) {
+    VMStringMemorySession *current = weakSession;
+    if (!current) return;
+    NSString *oldValue = current.rangeMode ? [VMStringMemorySession escapedTextForData:before]
+        : [VMStringMemorySession textPrefixInData:before stringEncoding:current.stringEncoding byteLength:NULL terminated:NULL];
+    NSString *newValue = current.rangeMode ? [VMStringMemorySession escapedTextForData:after]
+        : [VMStringMemorySession textPrefixInData:after stringEncoding:current.stringEncoding byteLength:NULL terminated:NULL];
+    if (!current.rangeMode) syncStringEntries(addr, newValue, current.stringEncoding, before.length, current.terminated);
     [engine rememberManualWriteUndoAtAddress:addr type:VMDataTypeString
-        oldValue:[VMStringMemorySession escapedTextForData:before]
-        oldData:before newValue:[VMStringMemorySession escapedTextForData:after]];
+        oldValue:oldValue oldData:before newValue:newValue
+        stringEncoding:current.stringEncoding stringRangeMode:current.rangeMode];
   };
   VMStringEditorViewController *editor = [VMStringEditorViewController new];
   editor.session = session;
+  editor.stringEncoding = encoding;
   editor.initialAddress = address;
   __weak __typeof(vc) weakVC = vc;
   editor.didChangeMemory = ^{
+    VMStringMemorySession *current = weakSession;
+    if (current && !current.rangeMode)
+      syncStringEntries(current.address, current.originalText, current.stringEncoding, current.originalBytes.length, current.terminated);
     if ([weakVC respondsToSelector:@selector(doRefreshValues)])
       [weakVC performSelector:@selector(doRefreshValues)];
   };
@@ -657,6 +700,14 @@
                      value:(NSString *)val
                       type:(VMDataType)type
                       inVC:(UIViewController *)vc {
+  [self showAddToLockAlert:addr value:val type:type stringEncoding:VMStringEncodingUTF8 inVC:vc];
+}
+
++ (void)showAddToLockAlert:(uint64_t)addr
+                     value:(NSString *)val
+                      type:(VMDataType)type
+            stringEncoding:(VMStringEncoding)encoding
+                      inVC:(UIViewController *)vc {
   for (NSDictionary *item in [VMMemoryEngine shared].lockedItems) {
     if ([item[@"addr"] unsignedLongLongValue] == addr) {
       [self showToast:TR(@"Msg_Already_Locked") inVC:vc];
@@ -684,7 +735,8 @@
                                  [[VMLockEngine shared] addAddressLock:addr
                                                                  value:val ?: @"0"
                                                                   type:(int)type
-                                                                  note:note];
+                                                                  note:note
+                                                        stringEncoding:encoding];
 
                                  [self showToast:TR(@"Alert_Success") inVC:vc];
                                }]];
@@ -697,6 +749,13 @@
 
 + (void)showAddToFavAlert:(uint64_t)addr
                      type:(VMDataType)type
+                     inVC:(UIViewController *)vc {
+  [self showAddToFavAlert:addr type:type stringEncoding:VMStringEncodingUTF8 inVC:vc];
+}
+
++ (void)showAddToFavAlert:(uint64_t)addr
+                     type:(VMDataType)type
+           stringEncoding:(VMStringEncoding)encoding
                      inVC:(UIViewController *)vc {
   NSString *bundleID = [[VMMemoryEngine shared] currentBundleID];
   if ([[VMFavoriteManager shared] isFavorite:addr forApp:bundleID]) {
@@ -723,7 +782,8 @@
                                          dictionaryWithDictionary:@{
                                            @"addr" : @(addr),
                                            @"note" : note ?: @"",
-                                           @"type" : @(type)
+                                           @"type" : @(type),
+                                           @"stringEncoding" : @(encoding)
                                          }];
                                  [[VMFavoriteManager shared]
                                      addFavorite:favItem

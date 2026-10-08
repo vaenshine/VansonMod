@@ -24,6 +24,20 @@ typedef enum : NSUInteger {
   VMDataTypeString = 10
 } VMDataType;
 
+typedef NS_ENUM(NSUInteger, VMStringEncoding) {
+  VMStringEncodingUTF8 = 0,
+  VMStringEncodingUTF16LE = 1,
+  VMStringEncodingUTF16BE = 2
+};
+
+static inline NSStringEncoding VMFoundationStringEncoding(VMStringEncoding encoding) {
+  switch (encoding) {
+    case VMStringEncodingUTF16LE: return NSUTF16LittleEndianStringEncoding;
+    case VMStringEncodingUTF16BE: return NSUTF16BigEndianStringEncoding;
+    default: return NSUTF8StringEncoding;
+  }
+}
+
 typedef enum : NSUInteger {
   VMSearchModeExact,
   VMSearchModeFuzzy,
@@ -65,6 +79,7 @@ typedef enum : NSUInteger {
 @property(nonatomic, strong) NSString *valueStr;
 @property(nonatomic, strong) NSNumber *prevValue;
 @property(nonatomic, assign) NSUInteger originalSize;
+@property(nonatomic, assign) VMStringEncoding stringEncoding;
 @end
 
 @interface VMModuleInfo : NSObject
@@ -87,6 +102,8 @@ typedef enum : NSUInteger {
 @property(nonatomic, strong) NSDate *date;
 @property(nonatomic, assign) NSUInteger resultCount;
 @property(nonatomic, assign) VMDataType dataType;
+@property(nonatomic, assign) VMStringEncoding stringEncoding;
+@property(nonatomic, assign) BOOL stringCaseSensitive;
 @end
 
 @interface VMMemoryWriteUndoItem : NSObject
@@ -98,6 +115,8 @@ typedef enum : NSUInteger {
 @property(nonatomic, copy) NSString *writtenValue;
 @property(nonatomic, strong) NSData *oldData;
 @property(nonatomic, strong) NSDate *date;
+@property(nonatomic, assign) VMStringEncoding stringEncoding;
+@property(nonatomic, assign) BOOL stringRangeMode;
 @end
 
 @interface VMMemoryWriteUndoBatch : NSObject
@@ -120,6 +139,8 @@ typedef enum : NSUInteger {
 @property(nonatomic, assign) double floatTolerance;
 @property(nonatomic, assign) BOOL groupAnchorMode;  
 @property(nonatomic, assign) VMDataType currentDataType;
+@property(nonatomic, assign) VMStringEncoding stringEncoding;
+@property(nonatomic, assign) BOOL stringCaseSensitive;
 @property(nonatomic, assign) uint64_t searchRangeStart;
 @property(nonatomic, assign) uint64_t searchRangeEnd;
 
@@ -205,6 +226,13 @@ typedef enum : NSUInteger {
                                 oldValue:(NSString *)oldValue
                                 oldData:(NSData *)oldData
                                 newValue:(NSString *)newValue;
+- (void)rememberManualWriteUndoAtAddress:(uint64_t)address
+                                    type:(VMDataType)type
+                                oldValue:(NSString *)oldValue
+                                 oldData:(NSData *)oldData
+                                newValue:(NSString *)newValue
+                          stringEncoding:(VMStringEncoding)encoding
+                         stringRangeMode:(BOOL)rangeMode;
 - (VMMemoryWriteUndoItem *)lastManualWriteUndoForAddress:(uint64_t)address
                                                     type:(VMDataType)type;
 - (BOOL)undoLastManualWriteForAddress:(uint64_t)address type:(VMDataType)type;
@@ -309,6 +337,16 @@ typedef enum : NSUInteger {
 - (uint64_t)findModuleBaseAddress:(NSString *)moduleName;
 
 - (NSString *)readAddress:(uint64_t)address type:(VMDataType)type;
+- (NSString *)readStringAtAddress:(uint64_t)address
+                        encoding:(VMStringEncoding)encoding
+                        maxBytes:(NSUInteger)maxBytes;
+- (BOOL)writeStringAtAddress:(uint64_t)address
+                      value:(NSString *)value
+                   encoding:(VMStringEncoding)encoding;
+- (BOOL)writeStringAtAddress:(uint64_t)address
+                      value:(NSString *)value
+                   encoding:(VMStringEncoding)encoding
+               byteCapacity:(NSUInteger)byteCapacity;
 
 - (BOOL)readFromSnapshot:(uint64_t)address buffer:(void *)buffer size:(size_t)size;
 - (BOOL)writeAddress:(uint64_t)address

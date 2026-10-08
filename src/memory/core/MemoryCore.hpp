@@ -2,6 +2,7 @@
 #define MemoryCore_hpp
 
 #include "MemoryTypes.hpp"
+#include <atomic>
 #include <functional>
 #include <mach/mach.h>
 #include <string>
@@ -111,6 +112,17 @@ public:
   
   void setGroupAnchorMode(bool enabled) { _groupAnchorMode = enabled; }
   bool getGroupAnchorMode() const { return _groupAnchorMode; }
+
+  void setStringSearchOptions(StringSearchOptions options) {
+    uint8_t encoding = static_cast<uint8_t>(options.encoding);
+    if (encoding > static_cast<uint8_t>(StringEncoding::UTF16BE)) encoding = 0;
+    _stringSearchFlags.store(encoding | (options.caseSensitive ? 4 : 0),
+                             std::memory_order_relaxed);
+  }
+  StringSearchOptions getStringSearchOptions() const {
+    const uint8_t flags = _stringSearchFlags.load(std::memory_order_relaxed);
+    return {static_cast<StringEncoding>(flags & 3), (flags & 4) != 0};
+  }
 
   void runSecurityChecks();
 
@@ -237,6 +249,7 @@ private:
   double _floatTolerance = 0.001;
   uint64_t _groupSearchRange = 50;
   bool _groupAnchorMode = false;  
+  std::atomic<uint8_t> _stringSearchFlags{4};
 
   std::string _storagePath;
   std::string _swapPath;

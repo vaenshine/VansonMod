@@ -3,6 +3,13 @@
 
 std::map<std::string, std::string> Lang_DE::getStrings() {
   return {
+    {"Str_Invalid_Text", "Ungültiger Text für die gewählte Kodierung oder ungültige Escape-Sequenz. Der Bereichsmodus unterstützt \\\\, \\0, \\n, \\r, \\t, \\xNN; bei einzelnen Zeichenfolgen dient U+0000 nur als Abschluss."},
+    {"Str_Not_Text", "An dieser Adresse lässt sich mit der gewählten Kodierung keine Zeichenfolge lesen. Prüfen Sie die Rohbytes im Bereichsmodus."},
+    {"Str_Use_Editor_Hint", "Öffnen Sie jede Zeichenfolge zum Bearbeiten im Texteditor."},
+    {"Search_Str_Encoding", "Zeichenkodierung"},
+    {"Search_Str_CaseSensitive", "Groß-/Kleinschreibung beachten"},
+    {"Search_Str_Reset_Hint", "Suche zurücksetzen, um Kodierung oder Groß-/Kleinschreibung zu ändern."},
+    {"Search_Str_Case_Hint", "Ausschalten, um Groß-/Kleinschreibung nach Unicode zu ignorieren."},
     {"Act_Import", "Importieren"},
     {"Set_Auto_Saved", "Änderungen werden automatisch gespeichert"},
     {"Set_Search_Section", "Suchparameter"},

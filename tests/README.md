@@ -7,9 +7,10 @@ bash tests/run_string_memory_tests.sh
 ```
 
 The tests use a bounded in-memory fixture, independent of a target process.
-They cover UTF-8 byte limits, null termination, exact-length range writes,
-address parsing, context paging, stale snapshots, partial failures, readback,
-and conflict-checked undo.
+They cover UTF-8 and UTF-16 LE/BE byte limits, null termination, surrogate pairs,
+exact-length raw-byte range writes, address parsing, context paging, stale
+snapshots, partial failures, readback, and conflict-checked undo. UTF-16 single
+strings preserve their byte order; range mode deliberately exposes escaped bytes.
 
 ## Device checks for 3.5
 
@@ -21,7 +22,7 @@ and conflict-checked undo.
 3. Shorten a null-terminated string, save, and undo. Verify neighboring bytes
    stay unchanged. Unterminated fragments require equal byte counts.
 4. Attempt a longer string and confirm saving is disabled. Byte counts use
-   UTF-8, including multibyte Chinese characters and emoji.
+   the selected UTF-8 or UTF-16 encoding, including Chinese characters and emoji.
 5. Switch strings with an unsaved draft; exercise cancel, discard, and save.
 6. Select an explicit hexadecimal start/end range (end inclusive, max 8192 bytes).
    Range mode displays raw separators/bytes as `\0`, `\n`, `\r`, `\t`,
@@ -125,6 +126,10 @@ bash tests/run_update_manager_tests.sh <booted-simulator-udid>
 
 表单提示专项：`bash tests/run_ui_review.sh <booted-simulator-udid> --form-hints-only`。15 个场景覆盖新增脚本、编辑信息及指针/锁定/RVA 弹框，检查作者标签和默认值分离、输入提示完整性，以及多行提示在输入、删除、程序赋值时的显示切换。截图保留脚本新增初始态和说明清空态。
 
+横向控件专项：`bash tests/run_ui_review.sh <booted-simulator-udid> --control-scroll-only`。4 个状态覆盖普通/320pt 宽度与深浅色。测试真实内存页的类型栏、页内工具栏、悬浮工具栏和批量工具栏，检查控件跟踪的取消策略、选中/高亮状态下的横拖准入及末项可见范围；选择 Str 后检查文本输入提示、键盘和精确模式限制，并通过实际筛选按钮回调验证点击功能。测试中的程序滚动和 `sendActions` 验证布局可达性与回调；手指拖动另外在模拟器或设备上验证，重点从分段/按钮内部按住后横拖，确认能到达 Str 和末尾工具且不会误触动作。
+
+字符串选项专项：`bash tests/run_ui_review.sh <booted-simulator-udid> --string-options-only`。400pt / 320pt 深浅色覆盖 UTF-8 默认值、UTF-16 LE/BE 选项、大小写与偏好保存、Unicode 输入、扫描/结果期间锁定、重置解锁，以及切回数值后 header 完全收缩。每个宽度/主题保存就绪、结果、时间线恢复及重置截图。搜索传输使用受控回调，展示值读取测试进程内的固定 UTF-16 缓冲区；时间线保存、文件恢复和真实 UIKit action handler 沿用正式代码。测试不遍历进程内存，内存值恢复被 fixture 禁用；此专项验证 UI 状态与配置传递，搜索比较算法由 core 专项独立验证。
+
 ### README 展示截图
 
 ```sh
@@ -134,6 +139,29 @@ bash tests/run_release_screenshots.sh <booted-simulator-udid>
 使用 Apple Silicon iPhone 模拟器生成 `Screenshots/` 中的 12 张英文展示图，界面与演示文本统一使用英文，覆盖进程、内存、指针、RVA、脚本表单及深浅色设置。页面由正式 UIKit 控制器绘制；应用、Bundle ID、PID、内存和列表结果均为固定演示数据。截图程序使用独立标识 `com.vanson.local.releasescreenshots`，每次重建自己的沙盒，并在全部截图成功后替换公开图片。
 
 `ReleaseScreenshotHarness.mm` 和两个截图 fixture 头文件仅用于此独立程序；正式应用的构建入口保持独立。构建日志与抓图日志位于 `.theos/release-screenshots/`。生成后逐张检查图片，并核对根目录和 `docs/` 中各 README 的相对路径。
+
+
+## String search and engine regression
+
+```sh
+bash tests/run_string_search_tests.sh
+bash tests/run_string_engine_tests.sh <booted-simulator-udid>
+```
+
+The search suite compiles production `MemoryCore.cpp` on Apple Silicon macOS
+with AddressSanitizer and UndefinedBehaviorSanitizer. Bounded Mach-memory
+fixtures exercise UTF-8, UTF-16 LE/BE, case-sensitive and Unicode case-folded
+searches, every byte alignment, block boundaries, exact scan/rescan byte lengths,
+malformed sequences, and non-ASCII folds. It performs no process attachment or
+memory writes.
+
+The simulator engine suite uses the production Objective-C engine and string
+editor session with memory allocated inside its own test process. It validates
+all three encodings at every byte alignment, page crossings, protected read
+boundaries, truncated code points, same-encoding writes, editor undo, and
+encoding metadata retained through lock/favorite undo synchronization. Read/write
+checks are restricted to that owned fixture; device attachment and jailbreak
+permissions still require a hardware check.
 
 ## Integer search regression
 

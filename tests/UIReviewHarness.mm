@@ -56,6 +56,7 @@ static BOOL ContainsLabel(UIView *view, NSString *text) {
   }
   return NO;
 }
+static NSUInteger reviewCaptureCount = 0;
 static void CaptureReviewWindow(UIWindow *window, NSDictionary *entry) {
   NSString *folder = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"UIReview"];
   [NSFileManager.defaultManager createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:nil];
@@ -66,6 +67,7 @@ static void CaptureReviewWindow(UIWindow *window, NSDictionary *entry) {
   NSString *name = entry[@"captureName"] ?: entry[@"name"];
   NSString *path = [folder stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"png"]];
   Check([UIImagePNGRepresentation(image) writeToFile:path atomically:YES], [@"captured " stringByAppendingString:name]);
+  reviewCaptureCount++;
 }
 
 @interface VMUpdateManager (ReviewAccess)
@@ -269,6 +271,8 @@ static void CheckSettingsGroup(VMSettingsViewController *settings, NSInteger gro
 - (NSArray<VMScanResultItem *> *)batchModificationItems;
 - (void)tableView:(UITableView *)tableView didDeselectRowAtIndexPath:(NSIndexPath *)indexPath;
 - (void)modeChanged;
+- (void)dataTypeChanged;
+- (void)showTimelineSheet;
 - (void)handleSearch;
 - (void)handleReset;
 - (void)refreshProcessHeader;
@@ -276,6 +280,7 @@ static void CheckSettingsGroup(VMSettingsViewController *settings, NSInteger gro
 - (void)applyFilter;
 - (void)fuzzyTypeChanged;
 - (void)executeFuzzyRepeatWithFilterMode:(VMFilterMode)mode total:(NSInteger)total;
+- (void)updateButtonStates;
 @end
 @interface VMItemEditViewController (ReviewAccess)
 - (void)onModeChange:(UISegmentedControl *)sender;
@@ -357,6 +362,92 @@ static uint8_t reviewMemory[16384] __attribute__((aligned(4096)));
 }
 @end
 
+// The scan transport is a deterministic callback fixture. Controllers, input
+// events, result rendering and timeline capture/restore use production code.
+// Reads are limited to reviewMemory, and value restoration is disabled.
+@interface VMStringOptionsFixture : NSObject
+@property(nonatomic, strong) NSMutableArray<NSDictionary *> *implementations;
+@property(nonatomic, copy) void (^pendingCompletion)(NSUInteger, NSString *);
+@property(nonatomic) NSUInteger scanCalls;
+@property(nonatomic) VMStringEncoding observedEncoding;
+@property(nonatomic) BOOL observedCaseSensitive;
+@property(nonatomic) BOOL observedNext;
+- (void)completeScan;
+- (void)restore;
+@end
+@implementation VMStringOptionsFixture
+- (void)replace:(SEL)selector block:(id)block {
+  Method method = class_getInstanceMethod(VMMemoryEngine.class, selector);
+  IMP replacement = imp_implementationWithBlock(block);
+  [self.implementations addObject:@{@"selector":NSStringFromSelector(selector),
+    @"original":[NSValue valueWithPointer:(const void *)method_getImplementation(method)],
+    @"replacement":[NSValue valueWithPointer:(const void *)replacement]}];
+  method_setImplementation(method, replacement);
+}
+- (instancetype)init {
+  if ((self = [super init])) {
+    self.implementations = [NSMutableArray array];
+    __weak VMStringOptionsFixture *weakSelf = self;
+    [self replace:@selector(scanMemoryWithMode:valStr:dataType:fuzzyType:isNextSearch:completion:)
+        block:^(VMMemoryEngine *engine, VMSearchMode mode, NSString *value, VMDataType type,
+                VMFuzzyType fuzzy, BOOL next, void (^completion)(NSUInteger, NSString *)) {
+      VMStringOptionsFixture *fixture = weakSelf;
+      Check(mode == VMSearchModeExact && type == VMDataTypeString,
+          @"Str UI fixture receives only exact string searches");
+      Check(engine.targetPid == getpid(), @"Str UI fixture keeps the isolated self-process target");
+      fixture.scanCalls++;
+      fixture.observedEncoding = engine.stringEncoding;
+      fixture.observedCaseSensitive = engine.stringCaseSensitive;
+      fixture.observedNext = next;
+      fixture.pendingCompletion = completion;
+    }];
+    [self replace:@selector(getResultItemAtIndex:dataType:)
+        block:^VMScanResultItem *(VMMemoryEngine *engine, NSUInteger index, VMDataType type) {
+      VMScanResultItem *item = [VMScanResultItem new];
+      item.address = (uint64_t)(reviewMemory + 8192);
+      item.type = VMDataTypeString;
+      item.stringEncoding = engine.stringEncoding;
+      item.originalSize = [@"Straße 世界 😀" lengthOfBytesUsingEncoding:VMFoundationStringEncoding(item.stringEncoding)];
+      return item;
+    }];
+    [self replace:@selector(canRestoreMemoryTimelineValuesAtIndex:)
+        block:^BOOL(VMMemoryEngine *engine, NSUInteger index) { return NO; }];
+  }
+  return self;
+}
+- (void)completeScan {
+  VMMemoryEngine *engine = VMMemoryEngine.shared;
+  NSData *text = [@"Straße 世界 😀" dataUsingEncoding:VMFoundationStringEncoding(engine.stringEncoding)];
+  memset(reviewMemory + 8192, 0, 512);
+  memcpy(reviewMemory + 8192, text.bytes, text.length);
+  // Match the production on-disk 24-byte RawResult layout for real timeline I/O.
+  uint8_t result[24] = {};
+  uint64_t address = (uint64_t)(reviewMemory + 8192), length = text.length;
+  memcpy(result, &address, sizeof(address));
+  memcpy(result + 8, &length, sizeof(length));
+  result[16] = VMDataTypeString;
+  NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:
+      [NSString stringWithFormat:@"string-ui-fixture-%@.bin", NSUUID.UUID.UUIDString]];
+  Check([[NSData dataWithBytes:result length:sizeof(result)] writeToFile:path atomically:YES],
+      @"Str UI fixture writes one bounded result for production timeline capture");
+  engine.resultFilePath = path;
+  engine.currentDataType = VMDataTypeString;
+  engine.resultCount = 1;
+  void (^completion)(NSUInteger, NSString *) = self.pendingCompletion;
+  self.pendingCompletion = nil;
+  Check(completion != nil, @"Str UI fixture completes an outstanding search callback");
+  completion(1, @"");
+}
+- (void)restore {
+  for (NSDictionary *entry in self.implementations) {
+    method_setImplementation(class_getInstanceMethod(VMMemoryEngine.class, NSSelectorFromString(entry[@"selector"])),
+        (IMP)[entry[@"original"] pointerValue]);
+    imp_removeBlock((IMP)[entry[@"replacement"] pointerValue]);
+  }
+  [self.implementations removeAllObjects];
+}
+@end
+
 static void CheckSearchHeaderFit(VMModifierViewController *modifier, NSString *stage) {
   UITableView *table = [modifier valueForKey:@"tableView"];
   UIView *header = table.tableHeaderView;
@@ -367,6 +458,160 @@ static void CheckSearchHeaderFit(VMModifierViewController *modifier, NSString *s
       [NSString stringWithFormat:@"%@: callback resizes table header (actual %.1f, fitting %.1f)", stage, header.bounds.size.height, natural]);
 }
 
+static UIScrollView *EnclosingScrollView(UIView *view) {
+  for (UIView *parent = view.superview; parent; parent = parent.superview)
+    if ([parent isKindOfClass:UIScrollView.class]) return (UIScrollView *)parent;
+  return nil;
+}
+
+// These checks exercise the real layout and cancellation policy. Programmatic
+// scrolling and control actions do not synthesize a finger drag; that has a
+// separate interactive check in the simulator/device review.
+static void CheckMemoryControlStrips(VMModifierViewController *modifier, BOOL compact) {
+  [modifier.view layoutIfNeeded];
+  UISegmentedControl *types = [modifier valueForKey:@"dataTypeSegment"];
+  UIStackView *headerActions = [modifier valueForKey:@"toolRowInHeader"];
+  UIVisualEffectView *floating = [modifier valueForKey:@"floatingToolBar"];
+  UIStackView *batchActions = [modifier valueForKey:@"batchStackView"];
+  UIScrollView *typeStrip = EnclosingScrollView(types);
+  UIScrollView *headerStrip = EnclosingScrollView(headerActions);
+  UIScrollView *floatingStrip = (UIScrollView *)ViewsOfClass(floating.contentView, UIScrollView.class).firstObject;
+  UIScrollView *batchStrip = EnclosingScrollView(batchActions);
+  Check(typeStrip && headerStrip && floatingStrip && batchStrip,
+      @"memory types, header actions, floating actions and batch actions have scroll containers");
+  NSArray<UIScrollView *> *strips = @[typeStrip, headerStrip, floatingStrip, batchStrip];
+  Check([NSSet setWithArray:strips].count == 4, @"all four independent memory control strips are covered");
+  UIScrollView *standard = [UIScrollView new];
+  NSArray<UIView *> *editingControls = @[[UITextField new], [UITextView new], [UISlider new], [UISwitch new]];
+  for (NSUInteger index = 0; index < strips.count; index++) {
+    UIScrollView *strip = strips[index];
+    [strip layoutIfNeeded];
+    UITableView *table = [modifier valueForKey:@"tableView"];
+    printf("CONTROL_STRIP index=%lu bounds=%.1fx%.1f content=%.1fx%.1f parent=%.1fx%.1f table=%.1fx%.1f offset=%.1f\n",
+        (unsigned long)index, strip.bounds.size.width, strip.bounds.size.height,
+        strip.contentSize.width, strip.contentSize.height,
+        strip.superview.bounds.size.width, strip.superview.bounds.size.height,
+        table.bounds.size.width, table.bounds.size.height, strip.contentOffset.x);
+    fflush(stdout);
+    Check(strip.bounds.size.width <= strip.superview.bounds.size.width + 1 &&
+        strip.bounds.size.width <= modifier.view.bounds.size.width + 1,
+        @"scroll viewport fits its parent and screen instead of being clipped as oversized content");
+    Check(strip.scrollEnabled && strip.canCancelContentTouches && strip.panGestureRecognizer.enabled,
+        [NSString stringWithFormat:@"strip %lu permits scrolling and cancellation after control tracking", (unsigned long)index]);
+    Check(strip.bounds.size.width > 0 && strip.bounds.size.height >= 44 &&
+        strip.contentSize.width >= strip.bounds.size.width - 1,
+        @"control strip has a usable viewport and measured content width");
+    NSArray<UIControl *> *controls = index == 0 ? @[types] : ViewsOfClass(strip, UIButton.class);
+    Check(controls.count > 0, @"control strip contains its real type/action controls");
+    for (UIControl *control in controls)
+      Check([strip touchesShouldCancelInContentView:control],
+          @"horizontal drag may cancel tracking of each type/action control");
+    for (UIControl *control in controls) {
+      NSArray<UIView *> *subviews = ViewsOfClass(control, UIView.class);
+      NSUInteger nestedControls = 0;
+      for (UIView *subview in subviews) {
+        if (subview == control) continue;
+        if ([subview isKindOfClass:UIControl.class]) nestedControls++;
+        Check([strip touchesShouldCancelInContentView:subview],
+            @"real type/action subviews yield tracking through their enclosing control");
+      }
+      printf("CONTROL_TRACKING strip=%lu control=%s descendants=%lu nestedControls=%lu\n",
+          (unsigned long)index, NSStringFromClass(control.class).UTF8String,
+          (unsigned long)(subviews.count - 1), (unsigned long)nestedControls);
+      fflush(stdout);
+    }
+    for (UIView *editingControl in editingControls)
+      Check([strip touchesShouldCancelInContentView:editingControl] ==
+          [standard touchesShouldCancelInContentView:editingControl],
+          @"text entry and continuous-value controls keep the standard tracking policy");
+    if (index > 0) {
+      UIControl *last = controls.lastObject;
+      CGRect destination = [last convertRect:last.bounds toView:strip];
+      [strip scrollRectToVisible:destination animated:NO];
+      CGRect revealed = [last convertRect:last.bounds toView:strip];
+      Check(CGRectContainsRect(CGRectInset(strip.bounds, -1, -1), revealed),
+          @"last toolbar action fits fully inside its scrolled viewport");
+      [strip setContentOffset:CGPointZero animated:NO];
+    }
+  }
+  // A bounded hierarchy covers SDKs that implement a segment with a nested
+  // UIControl. It leaves the actual UISegmentedControl's private views intact.
+  UISegmentedControl *nestedFixture = [[UISegmentedControl alloc] initWithItems:@[@"Fixture"]];
+  UIControl *nestedControl = [UIControl new];
+  UIView *nestedContent = [UIView new];
+  [nestedFixture addSubview:nestedControl];
+  [nestedControl addSubview:nestedContent];
+  Check([typeStrip touchesShouldCancelInContentView:nestedControl] &&
+      [typeStrip touchesShouldCancelInContentView:nestedContent],
+      @"a nested UIControl inside a segment yields tracking to horizontal scrolling");
+  NSMutableArray<NSString *> *typeTitles = [NSMutableArray array];
+  for (NSInteger index = 0; index < types.numberOfSegments; index++)
+    [typeTitles addObject:[types titleForSegmentAtIndex:index] ?: @""];
+  UISegmentedControl *standardTypes = [[UISegmentedControl alloc] initWithItems:typeTitles];
+  standardTypes.frame = types.frame;
+  UITapGestureRecognizer *tap = [UITapGestureRecognizer new];
+  UITableView *table = [modifier valueForKey:@"tableView"];
+  NSInteger originalSelection = types.selectedSegmentIndex;
+  BOOL originalHighlight = types.highlighted;
+  // Highlighted/selected state is set explicitly. A real tracking interaction
+  // still requires the separate physical/simulator drag check.
+  for (NSNumber *selection in @[@(VMDataTypeInt32), @(VMDataTypeString)]) {
+    for (NSNumber *highlighted in @[@NO, @YES]) {
+      types.selectedSegmentIndex = standardTypes.selectedSegmentIndex = selection.integerValue;
+      types.highlighted = standardTypes.highlighted = highlighted.boolValue;
+      Check([types gestureRecognizerShouldBegin:typeStrip.panGestureRecognizer],
+          @"selected and highlighted type controls permit their enclosing strip to begin panning");
+      Check([types gestureRecognizerShouldBegin:tap] == [standardTypes gestureRecognizerShouldBegin:tap] &&
+          [types gestureRecognizerShouldBegin:table.panGestureRecognizer] ==
+          [standardTypes gestureRecognizerShouldBegin:table.panGestureRecognizer],
+          @"tap and outer-table gestures retain UIKit's ordinary segmented-control policy");
+      Check(types.selectedSegmentIndex == selection.integerValue,
+          @"checking scroll gesture admission preserves the chosen data type");
+    }
+  }
+  types.selectedSegmentIndex = originalSelection;
+  types.highlighted = originalHighlight;
+  NSInteger strIndex = NSNotFound;
+  for (NSInteger index = 0; index < types.numberOfSegments; index++)
+    if ([[types titleForSegmentAtIndex:index] isEqualToString:@"Str"]) strIndex = index;
+  Check(strIndex != NSNotFound, @"memory type control retains the Str search entry");
+  [typeStrip setContentOffset:CGPointZero animated:NO];
+  CGFloat segmentWidth = types.bounds.size.width / types.numberOfSegments;
+  CGRect strSegment = CGRectMake(segmentWidth * strIndex, 0, segmentWidth, types.bounds.size.height);
+  CGRect destination = [types convertRect:strSegment toView:typeStrip];
+  if (compact)
+    Check(CGRectGetMaxX(destination) > CGRectGetMaxX(typeStrip.bounds),
+        @"compact fixture exercises a Str entry initially beyond the right edge");
+  [typeStrip scrollRectToVisible:destination animated:NO];
+  Check(CGRectContainsRect(CGRectInset(typeStrip.bounds, -1, -1), [types convertRect:strSegment toView:typeStrip]),
+      @"scroll content reaches the complete Str segment at the end of the type bar");
+  if (compact) Check(typeStrip.contentOffset.x > 0, @"compact type strip actually changes its content offset");
+
+  UISegmentedControl *modes = [modifier valueForKey:@"searchModeSegment"];
+  UITextField *input = [modifier valueForKey:@"inputField"];
+  for (NSNumber *restrictedMode in @[@(VMSearchModeFuzzy), @(VMSearchModeGroup)]) {
+    modes.selectedSegmentIndex = VMSearchModeExact;
+    [modes sendActionsForControlEvents:UIControlEventValueChanged];
+    Check([types isEnabledForSegmentAtIndex:strIndex], @"exact mode enables Str selection");
+    types.selectedSegmentIndex = strIndex;
+    [types sendActionsForControlEvents:UIControlEventValueChanged];
+    Check(types.selectedSegmentIndex == VMDataTypeString && !input.hidden &&
+        input.keyboardType == UIKeyboardTypeDefault &&
+        [input.placeholder isEqualToString:[[VMLocalization shared] localizedString:@"Mod_Input_Str"]],
+        @"selecting Str through the real action configures visible text input and its placeholder");
+    modes.selectedSegmentIndex = restrictedMode.integerValue;
+    [modes sendActionsForControlEvents:UIControlEventValueChanged];
+    Check(![types isEnabledForSegmentAtIndex:strIndex] && types.selectedSegmentIndex != VMDataTypeString,
+        @"fuzzy/group modes retain their numeric-only type selection");
+  }
+  modes.selectedSegmentIndex = VMSearchModeExact;
+  [modes sendActionsForControlEvents:UIControlEventValueChanged];
+  types.selectedSegmentIndex = strIndex;
+  [types sendActionsForControlEvents:UIControlEventValueChanged];
+  Check([types isEnabledForSegmentAtIndex:strIndex] && input.keyboardType == UIKeyboardTypeDefault,
+      @"returning to exact mode restores usable Str input");
+}
+
 @interface UIReviewApp : UIResponder <UIApplicationDelegate>
 @property(nonatomic, strong) UIWindow *window;
 @property(nonatomic, strong) VMRootViewController *root;
@@ -374,6 +619,7 @@ static void CheckSearchHeaderFit(VMModifierViewController *modifier, NSString *s
 @property(nonatomic) NSUInteger step;
 @property(nonatomic, strong) VMZeroSearchFixture *zeroFixture;
 @property(nonatomic) BOOL zeroScenarioReady;
+@property(nonatomic, strong) VMStringOptionsFixture *stringFixture;
 @property(nonatomic, strong) VMUpdateReviewFixture *updateFixture;
 @property(nonatomic) IMP originalUpdateShared;
 @property(nonatomic) IMP updateSharedReplacement;
@@ -579,13 +825,30 @@ static void CheckSearchHeaderFit(VMModifierViewController *modifier, NSString *s
   BOOL searchZeroOnly = [NSProcessInfo.processInfo.arguments containsObject:@"--search-zero-only"];
   BOOL updateUIOnly = [NSProcessInfo.processInfo.arguments containsObject:@"--update-ui-only"];
   BOOL formHintsOnly = [NSProcessInfo.processInfo.arguments containsObject:@"--form-hints-only"];
-  if (searchZeroOnly || updateUIOnly || formHintsOnly) {
+  BOOL controlScrollOnly = [NSProcessInfo.processInfo.arguments containsObject:@"--control-scroll-only"];
+  BOOL stringOptionsOnly = [NSProcessInfo.processInfo.arguments containsObject:@"--string-options-only"];
+  for (NSNumber *compact in @[@NO, @YES]) {
+    for (NSNumber *dark in @[@NO, @YES]) {
+      [self.pages addObject:@{@"name":[NSString stringWithFormat:@"memory-control-scroll%@%@",
+          compact.boolValue ? @"-compact" : @"", dark.boolValue ? @"-dark" : @""],
+        @"tab":@1, @"connected":@YES, @"compact":compact, @"dark":dark, @"controlScroll":@YES}];
+    }
+  }
+  for (NSNumber *width in @[@400, @320]) {
+    for (NSNumber *dark in @[@NO, @YES]) {
+      [self.pages addObject:@{@"name":[NSString stringWithFormat:@"string-options-%@%@",
+          width, dark.boolValue ? @"-dark" : @"-light"],
+        @"class":@"VMModifierViewController", @"connected":@YES,
+        @"width":width, @"dark":dark, @"stringOptions":@YES}];
+    }
+  }
+  if (searchZeroOnly || updateUIOnly || formHintsOnly || controlScrollOnly || stringOptionsOnly) {
     self.pages = [[self.pages filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *entry, NSDictionary *bindings) {
-      return formHintsOnly ? entry[@"modal"] != nil : updateUIOnly ? entry[@"updateScenario"] != nil : entry[@"zeroScenario"] != nil;
+      return stringOptionsOnly ? entry[@"stringOptions"] != nil : controlScrollOnly ? entry[@"controlScroll"] != nil : formHintsOnly ? entry[@"modal"] != nil : updateUIOnly ? entry[@"updateScenario"] != nil : entry[@"zeroScenario"] != nil;
     }]] mutableCopy];
   }
   Later(.5, ^{
-    if (searchZeroOnly || updateUIOnly || formHintsOnly) [self next]; else [self validate];
+    if (searchZeroOnly || updateUIOnly || formHintsOnly || controlScrollOnly || stringOptionsOnly) [self next]; else [self validate];
   });
   return YES;
 }
@@ -1022,13 +1285,225 @@ static void CheckSearchHeaderFit(VMModifierViewController *modifier, NSString *s
     Later(1.1, ^{ [self finishUpdateScenario:entry settings:settings originalPrompt:alert failure:YES]; });
   });
 }
+- (void)runControlScrollScenario:(NSDictionary *)entry modifier:(VMModifierViewController *)modifier {
+  [modifier handleReset];
+  // Allow the real reset callback and tab transition to finish before measuring.
+  Later(.3, ^{
+    CheckMemoryControlStrips(modifier, [entry[@"compact"] boolValue]);
+    VMZeroSearchFixture *fixture = [VMZeroSearchFixture new];
+    UISegmentedControl *types = [modifier valueForKey:@"dataTypeSegment"];
+    types.selectedSegmentIndex = VMDataTypeInt32;
+    [types sendActionsForControlEvents:UIControlEventValueChanged];
+    VMMemoryEngine.shared.currentDataType = VMDataTypeInt32;
+    VMMemoryEngine.shared.resultCount = 1;
+    [modifier updateButtonStates];
+    UIButton *filter = [modifier valueForKey:@"btnFilter"];
+    UIView *panel = [modifier valueForKey:@"filterPanelView"];
+    Check(filter.enabled && panel.hidden, @"fixture result enables the existing filter action");
+    [filter sendActionsForControlEvents:UIControlEventTouchUpInside];
+    Check(!panel.hidden, @"header filter button retains its real click callback");
+    [filter sendActionsForControlEvents:UIControlEventTouchUpInside];
+    Check(panel.hidden, @"repeated filter click closes the panel");
+    VMMemoryEngine.shared.resultCount = 0;
+    [modifier updateButtonStates];
+    [fixture restore];
+    [self.window layoutIfNeeded];
+    CaptureReviewWindow(self.window, entry);
+    self.step++;
+    [self next];
+  });
+}
+- (void)captureStringOptions:(NSDictionary *)entry suffix:(NSString *)suffix {
+  [self.window layoutIfNeeded];
+  CaptureReviewWindow(self.window, @{@"captureName":[entry[@"name"] stringByAppendingString:suffix]});
+}
+- (void)finishStringOptionsScenario:(NSDictionary *)entry modifier:(VMModifierViewController *)modifier {
+  [self.stringFixture restore];
+  self.stringFixture = nil;
+  [modifier handleReset];
+  Later(.12, ^{
+    UISegmentedControl *encoding = [modifier valueForKey:@"stringEncodingSegment"];
+    UISwitch *caseSwitch = [modifier valueForKey:@"stringCaseSwitch"];
+    Check(encoding.enabled && caseSwitch.enabled && ![[modifier valueForKey:@"isNextScan"] boolValue],
+        @"reset unlocks both Str options and exits result refinement");
+    CheckSearchHeaderFit(modifier, @"Str reset");
+    [self captureStringOptions:entry suffix:@"-reset"];
+    self.step++;
+    [self next];
+  });
+}
+- (void)restoreStringOptionsTimeline:(NSDictionary *)entry modifier:(VMModifierViewController *)modifier {
+  VMMemoryEngine *engine = VMMemoryEngine.shared;
+  Check(engine.memoryTimelineItems.count >= 2, @"real search callbacks capture string timeline entries");
+  VMMemoryTimelineItem *snapshot = engine.memoryTimelineItems.firstObject;
+  Check(snapshot.stringEncoding == VMStringEncodingUTF16LE && !snapshot.stringCaseSensitive,
+      @"production timeline retains encoding and case options");
+  [engine clearSession];
+  engine.stringEncoding = VMStringEncodingUTF16BE;
+  engine.stringCaseSensitive = YES;
+  [modifier setValue:@NO forKey:@"isNextScan"];
+  UISegmentedControl *encoding = [modifier valueForKey:@"stringEncodingSegment"];
+  UISwitch *caseSwitch = [modifier valueForKey:@"stringCaseSwitch"];
+  encoding.selectedSegmentIndex = VMStringEncodingUTF8;
+  caseSwitch.on = YES;
+  [modifier updateButtonStates];
+  Method factory = class_getClassMethod(UIAlertAction.class, @selector(actionWithTitle:style:handler:));
+  UpdateReviewOriginalActionFactory = (decltype(UpdateReviewOriginalActionFactory))method_getImplementation(factory);
+  method_setImplementation(factory, (IMP)UpdateReviewCaptureActionFactory);
+  [modifier showTimelineSheet];
+  method_setImplementation(factory, (IMP)UpdateReviewOriginalActionFactory);
+  Later(.2, ^{
+    UIAlertController *sheet = (id)modifier.presentedViewController;
+    Check([sheet isKindOfClass:UIAlertController.class] && sheet.actions.count > 1,
+        @"Str timeline opens its production UIKit sheet");
+    UIAlertAction *restore = sheet.actions.firstObject;
+    void (^handler)(UIAlertAction *) = objc_getAssociatedObject(restore, UpdateReviewActionHandlerKey);
+    Check(handler != nil, @"timeline restore uses its actual action handler");
+    [modifier dismissViewControllerAnimated:NO completion:^{
+      handler(restore);
+      Check(engine.stringEncoding == VMStringEncodingUTF16LE && !engine.stringCaseSensitive,
+          @"real timeline restoration restores engine string configuration");
+      Check(encoding.selectedSegmentIndex == VMStringEncodingUTF16LE && !caseSwitch.on &&
+          !encoding.enabled && !caseSwitch.enabled,
+          @"restored timeline synchronizes and locks visible Str configuration");
+      Check(((UISegmentedControl *)[modifier valueForKey:@"dataTypeSegment"]).selectedSegmentIndex == VMDataTypeString &&
+          ((UISegmentedControl *)[modifier valueForKey:@"searchModeSegment"]).selectedSegmentIndex == VMSearchModeExact,
+          @"restored Str timeline keeps the exact search controls active");
+      Later(1.4, ^{
+        CheckSearchHeaderFit(modifier, @"Str timeline restore");
+        [self captureStringOptions:entry suffix:@"-restored"];
+        [self finishStringOptionsScenario:entry modifier:modifier];
+      });
+    }];
+  });
+}
+- (void)runStringOptionsScenario:(NSDictionary *)entry modifier:(VMModifierViewController *)modifier {
+  [modifier handleReset];
+  Later(.25, ^{
+    [self.window layoutIfNeeded];
+    UISegmentedControl *types = [modifier valueForKey:@"dataTypeSegment"];
+    UISegmentedControl *modes = [modifier valueForKey:@"searchModeSegment"];
+    UISegmentedControl *encoding = [modifier valueForKey:@"stringEncodingSegment"];
+    UISwitch *caseSwitch = [modifier valueForKey:@"stringCaseSwitch"];
+    UIStackView *options = [modifier valueForKey:@"stringOptionsStack"];
+    UITextField *input = [modifier valueForKey:@"inputField"];
+    UITableView *table = [modifier valueForKey:@"tableView"];
+    modes.selectedSegmentIndex = VMSearchModeExact;
+    [modes sendActionsForControlEvents:UIControlEventValueChanged];
+    types.selectedSegmentIndex = VMDataTypeInt32;
+    [types sendActionsForControlEvents:UIControlEventValueChanged];
+    [self.window layoutIfNeeded];
+    CGFloat numericHeight = table.tableHeaderView.bounds.size.height;
+    Check(options.hidden, @"numeric search collapses the entire string-options stack");
+    types.selectedSegmentIndex = VMDataTypeString;
+    [types sendActionsForControlEvents:UIControlEventValueChanged];
+    [self.window layoutIfNeeded];
+    Check(!options.hidden && encoding.numberOfSegments == 3 && encoding.selectedSegmentIndex == VMStringEncodingUTF8 && caseSwitch.on,
+        @"new Str search offers UTF-8, UTF-16 LE and UTF-16 BE with case-sensitive UTF-8 defaults");
+    Check([[encoding titleForSegmentAtIndex:0] isEqual:@"UTF-8"] &&
+        [[encoding titleForSegmentAtIndex:1] isEqual:@"UTF-16 LE"] &&
+        [[encoding titleForSegmentAtIndex:2] isEqual:@"UTF-16 BE"], @"all three encoding labels identify their byte order");
+    Check(encoding.enabled && caseSwitch.enabled, @"fresh Str options are enabled");
+    Check(input.keyboardType == UIKeyboardTypeDefault &&
+        [input.placeholder isEqual:[VMLocalization.shared localizedString:@"Mod_Input_Str"]],
+        @"Str keeps its localized text placeholder and Unicode-capable keyboard");
+    Check(input.autocapitalizationType == UITextAutocapitalizationTypeNone &&
+        input.autocorrectionType == UITextAutocorrectionTypeNo && input.spellCheckingType == UITextSpellCheckingTypeNo &&
+        input.smartQuotesType == UITextSmartQuotesTypeNo && input.smartDashesType == UITextSmartDashesTypeNo,
+        @"Str search preserves typed case, quotes and punctuation without automatic substitutions");
+    Check(table.tableHeaderView.bounds.size.height >= numericHeight + 75,
+        @"visible Str controls receive their natural height");
+    for (UIView *control in @[encoding, caseSwitch]) {
+      CGRect rect = [control convertRect:control.bounds toView:options];
+      printf("STRING_OPTION_LAYOUT control=%s rect=%.1f,%.1f %.1fx%.1f stack=%.1fx%.1f\n",
+          NSStringFromClass(control.class).UTF8String, rect.origin.x, rect.origin.y, rect.size.width,
+          rect.size.height, options.bounds.size.width, options.bounds.size.height); fflush(stdout);
+      // iOS 26 UISwitch uses a 28pt intrinsic height and its thumb artwork
+      // extends 2pt beyond the layout width. Preserve UIKit's native sizing.
+      CGFloat minimumHeight = control == caseSwitch ? caseSwitch.intrinsicContentSize.height : 40;
+      CGFloat edgeAllowance = control == caseSwitch ? 3 : 1;
+      Check(rect.size.width > 0 && rect.size.height >= minimumHeight - 1 && rect.origin.x >= -edgeAllowance &&
+          CGRectGetMaxX(rect) <= options.bounds.size.width + edgeAllowance,
+          @"encoding and case controls fit the 400pt or 320pt content width");
+    }
+    for (UILabel *label in ViewsOfClass(options, UILabel.class)) {
+      if (label.hidden || !label.text.length || label.bounds.size.width == 0) continue;
+      CGSize natural = [label sizeThatFits:CGSizeMake(label.bounds.size.width, CGFLOAT_MAX)];
+      Check(label.bounds.size.height >= natural.height - 1, @"Str option labels fit their complete localized text");
+    }
+    CheckSearchHeaderFit(modifier, @"Str visible");
+    types.selectedSegmentIndex = VMDataTypeInt32;
+    [types sendActionsForControlEvents:UIControlEventValueChanged];
+    [self.window layoutIfNeeded];
+    Check(options.hidden && fabs(table.tableHeaderView.bounds.size.height - numericHeight) <= 1,
+        @"switching back to numbers removes every Str-options row without a blank gap");
+    CheckSearchHeaderFit(modifier, @"Str collapsed");
+    types.selectedSegmentIndex = VMDataTypeString;
+    [types sendActionsForControlEvents:UIControlEventValueChanged];
+    UIScrollView *typeStrip = EnclosingScrollView(types);
+    [typeStrip setContentOffset:CGPointMake(MAX(0, typeStrip.contentSize.width - typeStrip.bounds.size.width), 0) animated:NO];
+    input.text = @"Straße 世界 😀";
+    [input sendActionsForControlEvents:UIControlEventEditingChanged];
+    // Native segmented-control selection springs continue after layout.
+    Later(.55, ^{
+    [self captureStringOptions:entry suffix:@"-ready"];
+    encoding.selectedSegmentIndex = VMStringEncodingUTF16LE;
+    [encoding sendActionsForControlEvents:UIControlEventValueChanged];
+    caseSwitch.on = NO;
+    [caseSwitch sendActionsForControlEvents:UIControlEventValueChanged];
+    Check([NSUserDefaults.standardUserDefaults integerForKey:@"VMStringSearchEncoding"] == VMStringEncodingUTF16LE &&
+        ![NSUserDefaults.standardUserDefaults boolForKey:@"VMStringSearchCaseSensitive"],
+        @"user option changes save both search preferences");
+    self.stringFixture = [VMStringOptionsFixture new];
+    [modifier handleSearch];
+    VMStringOptionsFixture *fixture = self.stringFixture;
+    Check(fixture.scanCalls == 1 && !fixture.observedNext && fixture.observedEncoding == VMStringEncodingUTF16LE && !fixture.observedCaseSensitive,
+        @"first Str search forwards the selected encoding and Unicode case mode");
+    Check(!encoding.enabled && !caseSwitch.enabled && [[modifier valueForKey:@"isScanning"] boolValue],
+        @"both options lock while the search callback is pending");
+    [fixture completeScan];
+    Later(1.35, ^{
+      Check([[modifier valueForKey:@"isNextScan"] boolValue] && !encoding.enabled && !caseSwitch.enabled,
+          @"completed string results retain locked options for consistent rescans");
+      Check([((UILabel *)[modifier valueForKey:@"stringOptionsHint"]).text isEqual:
+          [VMLocalization.shared localizedString:@"Search_Str_Reset_Hint"]],
+          @"existing string results explain how to change their search options");
+      Check(![(UIButton *)[modifier valueForKey:@"btnFilter"] isEnabled],
+          @"numeric comparison filtering is disabled for string results");
+      UITableViewCell *cell = [table cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+      Check([cell.detailTextLabel.text isEqual:@"Straße 世界 😀"],
+          @"UTF-16 search result decodes and displays the complete Unicode fixture");
+      [self captureStringOptions:entry suffix:@"-results"];
+      // Deliberate stale control values simulate a restored/shared session; the
+      // next-search path must use the engine's saved result configuration.
+      encoding.selectedSegmentIndex = VMStringEncodingUTF8;
+      caseSwitch.on = YES;
+      [modifier handleSearch];
+      Check(fixture.scanCalls == 2 && fixture.observedNext &&
+          fixture.observedEncoding == VMStringEncodingUTF16LE && !fixture.observedCaseSensitive,
+          @"rescan preserves engine configuration despite stale control values");
+      [fixture completeScan];
+      Later(1.35, ^{ [self restoreStringOptionsTimeline:entry modifier:modifier]; });
+    });
+    });
+  });
+}
 - (void)next {
   if (self.step >= self.pages.count) {
-    printf("PASS: UI review completed (%lu screenshots)\n", (unsigned long)self.step); fflush(stdout); exit(0);
+    printf("PASS: UI review completed (%lu scenarios, %lu screenshots)\n", (unsigned long)self.step, (unsigned long)reviewCaptureCount); fflush(stdout); exit(0);
   }
   NSDictionary *entry = self.pages[self.step];
   BOOL compact = [entry[@"compact"] boolValue] || [entry[@"name"] hasSuffix:@"-compact"];
   self.window.frame = [entry[@"name"] hasSuffix:@"-landscape"] ? CGRectMake(0,0,740,360) : compact ? CGRectMake(0,0,320,740) : UIScreen.mainScreen.bounds;
+  if (entry[@"width"]) self.window.frame = CGRectMake(0, 0, [entry[@"width"] doubleValue], 800);
+  if (entry[@"stringOptions"]) {
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"VMStringSearchEncoding"];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"VMStringSearchCaseSensitive"];
+    [VMMemoryEngine.shared clearSession];
+    [VMMemoryEngine.shared clearMemoryTimeline];
+    VMMemoryEngine.shared.stringEncoding = VMStringEncodingUTF8;
+    VMMemoryEngine.shared.stringCaseSensitive = YES;
+  }
   self.window.overrideUserInterfaceStyle = ![entry[@"liveThemeSwitch"] boolValue] &&
       ([entry[@"dark"] boolValue] || [entry[@"name"] hasSuffix:@"-dark"]) ? UIUserInterfaceStyleDark : UIUserInterfaceStyleLight;
   if ([entry[@"connected"] boolValue] || [entry[@"modal"] isEqual:@"rva"]) {
@@ -1138,6 +1613,14 @@ static void CheckSearchHeaderFit(VMModifierViewController *modifier, NSString *s
   }
   if (entry[@"updateScenario"]) {
     Later(.1, ^{ [self runUpdateScenario:entry settings:(id)activePage]; });
+    return;
+  }
+  if (entry[@"controlScroll"]) {
+    [self runControlScrollScenario:entry modifier:(id)activePage];
+    return;
+  }
+  if (entry[@"stringOptions"]) {
+    [self runStringOptionsScenario:entry modifier:(id)activePage];
     return;
   }
   if ([entry[@"connected"] boolValue] && [activePage isKindOfClass:VMLockListViewController.class])

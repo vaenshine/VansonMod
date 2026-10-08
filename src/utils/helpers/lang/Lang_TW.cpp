@@ -3,6 +3,11 @@
 
 std::map<std::string, std::string> Lang_TW::getStrings() {
   return {
+    {"Str_Use_Editor_Hint", "請逐筆開啟字串編輯器修改文字。"},
+    {"Search_Str_Encoding", "字串編碼"},
+    {"Search_Str_CaseSensitive", "區分大小寫"},
+    {"Search_Str_Reset_Hint", "重設搜尋後可變更編碼和大小寫選項。"},
+    {"Search_Str_Case_Hint", "關閉後依 Unicode 忽略大小寫比對。"},
     {"Act_Import", "匯入"},
     {"Set_Auto_Saved", "設定會自動儲存"},
     {"Set_Search_Section", "搜尋參數"},
@@ -21,10 +26,10 @@ std::map<std::string, std::string> Lang_TW::getStrings() {
     {"Btn_Cancel", "取消"},
     {"Str_Target_Changed", "目標已切換或中斷，請重新開啟編輯器。"},
     {"Str_Read_Failed", "記憶體讀取不完整，位址可能已失效。"},
-    {"Str_Not_Text", "該位址開頭無法識別 UTF-8 字串，可使用範圍編輯查看原始位元組。"},
+    {"Str_Not_Text", "該位址開頭無法依所選編碼識別字串，可使用範圍編輯查看原始位元組。"},
     {"Str_Invalid_Range", "請輸入十六進位起止位址（包含終點），範圍最多 8192 位元組。"},
     {"Str_Context_Limit", "前後文已達到 64 KB 上限。切換到附近字串後重新載入可重設中心。"},
-    {"Str_Invalid_Text", "文字或跳脫格式無效。範圍模式支援 \\\\、\\0、\\n、\\r、\\t、\\xNN；單條模式要求正文中無空位元組。"},
+    {"Str_Invalid_Text", "文字與所選編碼不相容或跳脫格式無效。範圍模式支援 \\\\, \\0, \\n, \\r, \\t, \\xNN；單條模式中的 U+0000 僅用作結束符號。"},
     {"Str_Equal_Length", "要求修改前後位元組數相等"},
     {"Str_Too_Long", "修改內容超過原始位元組長度。擴大寫入邊界需要明確選擇範圍。"},
     {"Str_Conflict", "目標記憶體已發生變化，本次寫入已阻止。請重新載入確認最新內容。"},

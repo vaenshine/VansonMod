@@ -1,5 +1,12 @@
 #import <UIKit/UIKit.h>
 
+// A horizontal strip whose buttons and segments yield tracking to a drag.
+@interface VMControlStripScrollView : UIScrollView
+@end
+
+@interface VMScrollableSegmentedControl : UISegmentedControl
+@end
+
 @interface VMUIHelper : NSObject
 
 + (UIColor *)accentColor;

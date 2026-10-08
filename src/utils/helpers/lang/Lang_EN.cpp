@@ -3,6 +3,11 @@
 
 std::map<std::string, std::string> Lang_EN::getStrings() {
   return {
+    {"Str_Use_Editor_Hint", "Open each string in the string editor to edit its text."},
+    {"Search_Str_Encoding", "String encoding"},
+    {"Search_Str_CaseSensitive", "Case sensitive"},
+    {"Search_Str_Reset_Hint", "Reset the search to change encoding or case options."},
+    {"Search_Str_Case_Hint", "Turn off for Unicode case-insensitive matching."},
     {"Act_Import", "Import"},
     {"Set_Auto_Saved", "Changes are saved automatically"},
     {"Set_Search_Section", "Search parameters"},
@@ -21,10 +26,10 @@ std::map<std::string, std::string> Lang_EN::getStrings() {
     {"Btn_Cancel", "Cancel"},
     {"Str_Target_Changed", "Target changed or disconnected. Reopen the editor."},
     {"Str_Read_Failed", "Memory could not be read completely. The address may be unavailable."},
-    {"Str_Not_Text", "No readable UTF-8 string starts here. Use range editing to inspect raw bytes."},
+    {"Str_Not_Text", "The selected encoding cannot decode a string at this address. Use range editing to inspect raw bytes."},
     {"Str_Invalid_Range", "Enter hexadecimal start/end addresses (end inclusive). Maximum: 8192 bytes."},
     {"Str_Context_Limit", "Context limit: 64 KB. Select a nearby string and reload to recenter."},
-    {"Str_Invalid_Text", "Invalid UTF-8 or escape sequence. Range mode supports \\\\ \\0 \\n \\r \\t and \\xNN; single-string mode excludes embedded zero bytes."},
+    {"Str_Invalid_Text", "Invalid text for the selected encoding or an invalid escape sequence. Range mode supports \\\\, \\0, \\n, \\r, \\t, \\xNN; single-string mode reserves U+0000 for the terminator."},
     {"Str_Equal_Length", "Exact byte length required"},
     {"Str_Too_Long", "Edited text exceeds the original byte limit. Select a range explicitly to change the write boundary."},
     {"Str_Conflict", "Memory changed since it was read. This write was blocked. Reload to inspect the latest bytes."},
